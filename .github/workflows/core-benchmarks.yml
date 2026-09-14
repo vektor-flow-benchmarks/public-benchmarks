@@ -81,12 +81,23 @@ jobs:
             --pattern benchmark-suite.tar.gz.sha256 \
             --pattern "vkf-benchmark-driver-${{ matrix.target }}.tar.gz" \
             --pattern "vkf-benchmark-driver-${{ matrix.target }}.tar.gz.sha256"
+          if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
+            gh release download "${{ inputs.candidate_tag }}" \
+              --repo "${{ github.repository }}" \
+              --pattern vkf-benchmark-driver-windows-x64-overlay.tar.gz \
+              --pattern vkf-benchmark-driver-windows-x64-overlay.tar.gz.sha256
+          fi
           node scripts/verify-downloads.mjs \
             benchmark-suite.tar.gz \
             "vkf-benchmark-driver-${{ matrix.target }}.tar.gz"
           mkdir suite candidate
           tar -xzf benchmark-suite.tar.gz -C suite
           tar -xzf "vkf-benchmark-driver-${{ matrix.target }}.tar.gz" -C candidate
+          if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
+            node scripts/verify-downloads.mjs \
+              vkf-benchmark-driver-windows-x64-overlay.tar.gz
+            tar -xzf vkf-benchmark-driver-windows-x64-overlay.tar.gz -C candidate
+          fi
           node scripts/enable-optimizer-budget.mjs \
             suite/benchmarks/core-comparison/run.mjs
           if [[ "${{ runner.os }}" != "Windows" ]]; then
