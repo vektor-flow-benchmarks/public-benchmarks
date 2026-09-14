@@ -79,6 +79,8 @@ jobs:
             --repo "${{ github.repository }}" \
             --pattern benchmark-suite.tar.gz \
             --pattern benchmark-suite.tar.gz.sha256 \
+            --pattern benchmark-suite-overlay.tar.gz \
+            --pattern benchmark-suite-overlay.tar.gz.sha256 \
             --pattern "vkf-benchmark-driver-${{ matrix.target }}.tar.gz" \
             --pattern "vkf-benchmark-driver-${{ matrix.target }}.tar.gz.sha256"
           gh release download "${{ inputs.candidate_tag }}" \
@@ -87,9 +89,11 @@ jobs:
             --pattern "vkf-benchmark-driver-${{ matrix.target }}-overlay.tar.gz.sha256"
           node scripts/verify-downloads.mjs \
             benchmark-suite.tar.gz \
+            benchmark-suite-overlay.tar.gz \
             "vkf-benchmark-driver-${{ matrix.target }}.tar.gz"
           mkdir suite candidate
           tar -xzf benchmark-suite.tar.gz -C suite
+          tar -xzf benchmark-suite-overlay.tar.gz -C suite
           tar -xzf "vkf-benchmark-driver-${{ matrix.target }}.tar.gz" -C candidate
           node scripts/verify-downloads.mjs \
             "vkf-benchmark-driver-${{ matrix.target }}-overlay.tar.gz"
