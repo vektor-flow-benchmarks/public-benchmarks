@@ -1,0 +1,122 @@
+name: Native benchmark matrix
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_tag:
+        description: Candidate release containing the source-free driver bundles
+        required: true
+        default: candidate-0.4.5
+      stage:
+        description: Acceptance stage
+        required: true
+        default: stage1
+        type: choice
+        options:
+          - stage1
+          - stage2
+      platform:
+        description: Platform to benchmark
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - windows-x64
+          - linux-x64
+          - macos-arm64
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-${{ inputs.candidate_tag }}-${{ inputs.stage }}-${{ inputs.platform }}
+  cancel-in-progress: false
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(inputs.platform == 'all' && '{"include":[{"id":"windows-x64","os":"windows-latest","suffix":".exe"},{"id":"linux-x64","os":"ubuntu-24.04","suffix":""},{"id":"macos-arm64","os":"macos-15","suffix":""}]}' || inputs.platform == 'windows-x64' && '{"include":[{"id":"windows-x64","os":"windows-latest","suffix":".exe"}]}' || inputs.platform == 'linux-x64' && '{"include":[{"id":"linux-x64","os":"ubuntu-24.04","suffix":""}]}' || '{"include":[{"id":"macos-arm64","os":"macos-15","suffix":""}]}') }}
+    name: ${{ matrix.id }} · ${{ inputs.stage }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Install Rust 1.98.0
+        shell: bash
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal
+          rustup default 1.98.0
+      - name: Install Windows Clang
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install llvm --yes --no-progress
+      - name: Install Linux Clang
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends clang build-essential
+      - name: Download source-free benchmark inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release download "${{ inputs.candidate_tag }}" \
+            --repo "${{ github.repository }}" \
+            --pattern benchmark-suite.tar.gz \
+            --pattern benchmark-suite.tar.gz.sha256 \
+            --pattern "vkf-benchmark-driver-${{ matrix.id }}.tar.gz" \
+            --pattern "vkf-benchmark-driver-${{ matrix.id }}.tar.gz.sha256"
+          node scripts/verify-downloads.mjs \
+            benchmark-suite.tar.gz \
+            "vkf-benchmark-driver-${{ matrix.id }}.tar.gz"
+          mkdir suite candidate
+          tar -xzf benchmark-suite.tar.gz -C suite
+          tar -xzf "vkf-benchmark-driver-${{ matrix.id }}.tar.gz" -C candidate
+          if [[ "${{ runner.os }}" != "Windows" ]]; then
+            chmod 755 "candidate/bin/vkf-benchmark-driver${{ matrix.suffix }}"
+          fi
+      - name: Select acceptance stage
+        shell: bash
+        run: |
+          if [[ "${{ inputs.stage }}" == "stage1" ]]; then
+            echo "BENCH_RUNS=10" >> "$GITHUB_ENV"
+            echo "ENFORCE_RELATIVE_GATE=true" >> "$GITHUB_ENV"
+          else
+            echo "BENCH_RUNS=100" >> "$GITHUB_ENV"
+            echo "ENFORCE_RELATIVE_GATE=false" >> "$GITHUB_ENV"
+          fi
+      - name: Run five-workload comparison
+        shell: bash
+        env:
+          VKF_BENCH_DRIVER: ${{ github.workspace }}/candidate/bin/vkf-benchmark-driver${{ matrix.suffix }}
+        run: >-
+          cd suite && node benchmarks/core-comparison/run.mjs
+          --case=spectral-norm-large,fannkuch-redux-large,n-body-large,combined-kernels-large,combined-kernels-parallel-large
+          --language=vkf,cpp,rust,zig
+          --max-cores=2
+          --compile-runs=1
+          --compile-warmups=1
+          --runs=${BENCH_RUNS}
+          --warmups=10
+          --process-runs=1
+          --process-warmups=1
+          --function-landscape-runs=0
+          --enforce-relative-gate=${ENFORCE_RELATIVE_GATE}
+          --relative-limit=0.5
+          --output=${{ matrix.id }}-045-${{ inputs.stage }}-${{ github.run_id }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ matrix.id }}-${{ inputs.stage }}
+          if-no-files-found: warn
+          path: |
+            suite/benchmarks/core-comparison/results/${{ matrix.id }}-045-${{ inputs.stage }}-${{ github.run_id }}.json
+            suite/benchmarks/core-comparison/results/${{ matrix.id }}-045-${{ inputs.stage }}-${{ github.run_id }}.md

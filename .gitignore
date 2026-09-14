@@ -1,0 +1,6 @@
+results/
+.work/
+candidate/
+suite/
+candidate-assets/
+*.tmp

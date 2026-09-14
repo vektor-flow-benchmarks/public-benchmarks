@@ -1,0 +1,38 @@
+name: Public runner smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runner:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: linux-x64
+            os: ubuntu-24.04
+            architecture: x64
+          - id: windows-x64
+            os: windows-latest
+            architecture: x64
+          - id: macos-arm64
+            os: macos-15
+            architecture: arm64
+    name: ${{ matrix.id }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify runner contract
+        shell: bash
+        run: >-
+          node -e "const os=require('node:os');
+          const cores=os.cpus().length;
+          console.log(JSON.stringify({platform:process.platform,architecture:process.arch,cores}));
+          if(process.arch!=='${{ matrix.architecture }}')process.exit(2);
+          if(cores<2)process.exit(3);"
