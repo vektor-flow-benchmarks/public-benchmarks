@@ -1,0 +1,120 @@
+name: WASM browser benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_tag:
+        description: Candidate release containing source-free benchmark inputs
+        required: true
+        default: candidate-0.4.5-773b899c
+      stage:
+        description: Acceptance stage
+        required: true
+        default: stage1
+        type: choice
+        options:
+          - stage1
+          - stage2
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wasm-${{ inputs.candidate_tag }}-${{ inputs.stage }}
+  cancel-in-progress: false
+
+jobs:
+  browsers:
+    name: macOS ARM64 · Chrome, Firefox, Safari · ${{ inputs.stage }}
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download source-free benchmark inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${{ inputs.candidate_tag }}" \
+            --repo "${{ github.repository }}" \
+            --pattern benchmark-suite.tar.gz \
+            --pattern benchmark-suite.tar.gz.sha256 \
+            --pattern benchmark-suite-overlay.tar.gz \
+            --pattern benchmark-suite-overlay.tar.gz.sha256 \
+            --pattern wasm-browser-artifacts-overlay.tar.gz \
+            --pattern wasm-browser-artifacts-overlay.tar.gz.sha256 \
+            --pattern vkf-benchmark-driver-macos-arm64-overlay.tar.gz \
+            --pattern vkf-benchmark-driver-macos-arm64-overlay.tar.gz.sha256
+          node scripts/verify-downloads.mjs \
+            benchmark-suite.tar.gz \
+            benchmark-suite-overlay.tar.gz \
+            wasm-browser-artifacts-overlay.tar.gz \
+            vkf-benchmark-driver-macos-arm64-overlay.tar.gz
+          mkdir suite candidate
+          tar -xzf benchmark-suite.tar.gz -C suite
+          tar -xzf benchmark-suite-overlay.tar.gz -C suite
+          mkdir -p suite/benchmarks/core-comparison/wasm-artifacts
+          tar -xzf wasm-browser-artifacts-overlay.tar.gz \
+            -C suite/benchmarks/core-comparison/wasm-artifacts
+          tar -xzf vkf-benchmark-driver-macos-arm64-overlay.tar.gz \
+            -C candidate
+          chmod 755 candidate/bin/vkf-benchmark-driver
+      - name: Prepare browser drivers
+        run: |
+          echo "$CHROMEWEBDRIVER" >> "$GITHUB_PATH"
+          echo "$GECKOWEBDRIVER" >> "$GITHUB_PATH"
+          sudo safaridriver --enable
+          "$CHROMEWEBDRIVER/chromedriver" --version
+          "$GECKOWEBDRIVER/geckodriver" --version
+          safaridriver --version
+          /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --version
+          /Applications/Firefox.app/Contents/MacOS/firefox --version
+          sw_vers
+          sysctl -n machdep.cpu.brand_string || true
+      - name: Select acceptance stage
+        run: |
+          if [[ "${{ inputs.stage }}" == "stage1" ]]; then
+            echo "BENCH_RUNS=10" >> "$GITHUB_ENV"
+            echo "ENFORCE_NATIVE_RATIO=true" >> "$GITHUB_ENV"
+          else
+            echo "BENCH_RUNS=100" >> "$GITHUB_ENV"
+            echo "ENFORCE_NATIVE_RATIO=false" >> "$GITHUB_ENV"
+          fi
+      - name: Measure same-host native VKF baseline
+        env:
+          VKF_BENCH_DRIVER: ${{ github.workspace }}/candidate/bin/vkf-benchmark-driver
+        run: >-
+          cd suite && node benchmarks/core-comparison/run.mjs
+          --case=spectral-norm-small
+          --language=vkf
+          --output=macos-arm64-045-${{ inputs.stage }}-wasm-native-${{ github.run_id }}
+          --compile-runs=1
+          --compile-warmups=1
+          --process-runs=1
+          --process-warmups=1
+          --runs=${BENCH_RUNS}
+          --warmups=10
+          --function-landscape-runs=0
+      - name: Measure browser WASM runtimes
+        run: >-
+          cd suite && node benchmarks/core-comparison/run-wasm-browser-matrix.mjs
+          --browsers=chrome,firefox,safari
+          --output=macos-arm64-045-${{ inputs.stage }}-wasm-${{ github.run_id }}
+          --native-report=benchmarks/core-comparison/results/macos-arm64-045-${{ inputs.stage }}-wasm-native-${{ github.run_id }}.json
+          --native-ratio-limit=2
+          --runs=${BENCH_RUNS}
+          --warmups=10
+          --enforce-native-ratio=${ENFORCE_NATIVE_RATIO}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wasm-browser-macos-arm64-${{ inputs.stage }}
+          if-no-files-found: warn
+          path: |
+            suite/benchmarks/core-comparison/results/macos-arm64-045-${{ inputs.stage }}-wasm-${{ github.run_id }}.json
+            suite/benchmarks/core-comparison/results/macos-arm64-045-${{ inputs.stage }}-wasm-${{ github.run_id }}.md
+            suite/benchmarks/core-comparison/results/macos-arm64-045-${{ inputs.stage }}-wasm-native-${{ github.run_id }}.json
+            suite/benchmarks/core-comparison/results/macos-arm64-045-${{ inputs.stage }}-wasm-native-${{ github.run_id }}.md
+            suite/benchmarks/core-comparison/wasm-artifacts/spectral-norm-small/manifest.json
