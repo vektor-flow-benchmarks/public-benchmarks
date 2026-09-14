@@ -1,13 +1,18 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
-const [target] = process.argv.slice(2);
-if (!target) throw new Error('usage: node enable-optimizer-budget.mjs run.mjs');
+const [target, benchmark = ''] = process.argv.slice(2);
+if (!target) throw new Error('usage: node enable-optimizer-budget.mjs run.mjs [benchmark]');
+
+const combined = benchmark.startsWith('combined-kernels');
+const optimizerRuns = combined ? '10' : '1000';
+const optimizerTimeLimitMs = combined ? '5000' : '60000';
 
 let source = readFileSync(target, 'utf8').replaceAll('\r\n', '\n');
 const compileBefore = "return ['--aot', '--optimizer-policy', 'auto', '--source', source];";
 const compileAfter = `return [
     '--aot', '--optimizer-policy', 'auto',
-    '--optimizer-runs', '10', '--optimizer-time-limit-ms', '5000',
+    '--optimizer-runs', '${optimizerRuns}',
+    '--optimizer-time-limit-ms', '${optimizerTimeLimitMs}',
     '--source', source
   ];`;
 const runtimeBefore = `'--optimizer-policy', reuseFunctionPolicy || optimizerPolicy === 'mixed'
@@ -16,7 +21,8 @@ const runtimeBefore = `'--optimizer-policy', reuseFunctionPolicy || optimizerPol
 const runtimeAfter = `'--optimizer-policy', reuseFunctionPolicy || optimizerPolicy === 'mixed'
       ? 'auto' : optimizerPolicy,
     ...((reuseFunctionPolicy || optimizerPolicy === 'mixed')
-      ? ['--optimizer-runs', '10', '--optimizer-time-limit-ms', '5000']
+      ? ['--optimizer-runs', '${optimizerRuns}',
+          '--optimizer-time-limit-ms', '${optimizerTimeLimitMs}']
       : []),
     '--source', source`;
 
