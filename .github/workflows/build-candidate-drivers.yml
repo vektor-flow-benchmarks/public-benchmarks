@@ -7,10 +7,10 @@ on:
         description: Candidate release to read and update
         required: true
         default: candidate-0.4.5
-      source_asset:
-        description: Encrypted compiler source asset
+      source_ref:
+        description: Private compiler candidate branch or commit
         required: true
-        default: vkf-candidate-compiler-source.tar.gz.enc
+        default: candidate-driver-0.4.5
 
 permissions:
   contents: write
@@ -34,7 +34,17 @@ jobs:
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out public runner
+        uses: actions/checkout@v4
+
+      - name: Check out private compiler candidate
+        uses: actions/checkout@v4
+        with:
+          repository: svenviktorjonsson/vektor-flow
+          ref: ${{ inputs.source_ref }}
+          ssh-key: ${{ secrets.VKF_PRIVATE_REPO_DEPLOY_KEY }}
+          persist-credentials: false
+          path: source
 
       - name: Install Linux build tools
         if: runner.os == 'Linux'
@@ -45,21 +55,6 @@ jobs:
       - name: Verify runner architecture
         shell: bash
         run: test "$(uname -m)" = "${{ matrix.machine }}"
-
-      - name: Download and decrypt candidate source
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VKF_CANDIDATE_SOURCE_KEY: ${{ secrets.VKF_CANDIDATE_SOURCE_KEY }}
-        shell: bash
-        run: |
-          test -n "$VKF_CANDIDATE_SOURCE_KEY"
-          gh release download "${{ inputs.candidate_tag }}" \
-            --repo "${{ github.repository }}" \
-            --pattern "${{ inputs.source_asset }}"
-          mkdir source
-          node scripts/decrypt-candidate-source.mjs \
-            "${{ inputs.source_asset }}" source.tar.gz
-          tar -xzf source.tar.gz -C source
 
       - name: Build optimized benchmark driver
         shell: bash
