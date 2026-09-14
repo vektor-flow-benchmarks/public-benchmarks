@@ -1,0 +1,101 @@
+name: Build candidate benchmark drivers
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_tag:
+        description: Candidate release to read and update
+        required: true
+        default: candidate-0.4.5
+      source_asset:
+        description: Encrypted compiler source asset
+        required: true
+        default: vkf-candidate-compiler-source.tar.gz.enc
+
+permissions:
+  contents: write
+
+concurrency:
+  group: candidate-driver-${{ inputs.candidate_tag }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+            machine: x86_64
+          - target: macos-arm64
+            runner: macos-15
+            machine: arm64
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends cmake ninja-build g++
+
+      - name: Verify runner architecture
+        shell: bash
+        run: test "$(uname -m)" = "${{ matrix.machine }}"
+
+      - name: Download and decrypt candidate source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VKF_CANDIDATE_SOURCE_KEY: ${{ secrets.VKF_CANDIDATE_SOURCE_KEY }}
+        shell: bash
+        run: |
+          test -n "$VKF_CANDIDATE_SOURCE_KEY"
+          gh release download "${{ inputs.candidate_tag }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "${{ inputs.source_asset }}"
+          mkdir source
+          openssl enc -d -aes-256-cbc -pbkdf2 \
+            -in "${{ inputs.source_asset }}" \
+            -pass env:VKF_CANDIDATE_SOURCE_KEY \
+            | tar -xzf - -C source
+
+      - name: Build optimized benchmark driver
+        shell: bash
+        run: |
+          cmake -S source/compiler/native -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2 --target vkf
+          build/bin/vkf -v | grep -Fx 'VKF 0.4.5'
+
+      - name: Package source-free overlay
+        shell: bash
+        run: |
+          mkdir -p package/bin
+          cp build/bin/vkf package/bin/vkf-benchmark-driver
+          tar -czf "vkf-benchmark-driver-${{ matrix.target }}-overlay.tar.gz" \
+            -C package bin
+          openssl dgst -sha256 \
+            "vkf-benchmark-driver-${{ matrix.target }}-overlay.tar.gz" \
+            | awk '{print $2 "  vkf-benchmark-driver-${{ matrix.target }}-overlay.tar.gz"}' \
+            > "vkf-benchmark-driver-${{ matrix.target }}-overlay.tar.gz.sha256"
+
+      - name: Publish source-free overlay
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release upload "${{ inputs.candidate_tag }}" \
+            "vkf-benchmark-driver-${{ matrix.target }}-overlay.tar.gz" \
+            "vkf-benchmark-driver-${{ matrix.target }}-overlay.tar.gz.sha256" \
+            --repo "${{ github.repository }}" \
+            --clobber
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vkf-benchmark-driver-${{ matrix.target }}-overlay
+          path: |
+            vkf-benchmark-driver-${{ matrix.target }}-overlay.tar.gz
+            vkf-benchmark-driver-${{ matrix.target }}-overlay.tar.gz.sha256
