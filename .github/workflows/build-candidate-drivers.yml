@@ -25,12 +25,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - target: windows-x64
+            runner: windows-2025
+            machine: x86_64
+            binary: build/bin/vkf.exe
+            packaged: vkf-benchmark-driver.exe
           - target: linux-x64
             runner: ubuntu-24.04
             machine: x86_64
+            binary: build/bin/vkf
+            packaged: vkf-benchmark-driver
           - target: macos-arm64
             runner: macos-15
             machine: arm64
+            binary: build/bin/vkf
+            packaged: vkf-benchmark-driver
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     steps:
@@ -62,13 +71,13 @@ jobs:
           cmake -S source/compiler/native -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build build --parallel 2 --target vkf
-          build/bin/vkf -v | grep -Fx 'VKF 0.4.5'
+          "${{ matrix.binary }}" -v | grep -Fx 'VKF 0.4.5'
 
       - name: Package source-free overlay
         shell: bash
         run: |
           mkdir -p package/bin
-          cp build/bin/vkf package/bin/vkf-benchmark-driver
+          cp "${{ matrix.binary }}" "package/bin/${{ matrix.packaged }}"
           tar -czf "vkf-benchmark-driver-${{ matrix.target }}-overlay.tar.gz" \
             -C package bin
           openssl dgst -sha256 \
