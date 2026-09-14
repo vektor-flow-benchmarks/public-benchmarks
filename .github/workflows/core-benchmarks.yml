@@ -95,9 +95,6 @@ jobs:
             "vkf-benchmark-driver-${{ matrix.target }}-overlay.tar.gz"
           tar -xzf "vkf-benchmark-driver-${{ matrix.target }}-overlay.tar.gz" \
             -C candidate
-          node scripts/enable-optimizer-budget.mjs \
-            suite/benchmarks/core-comparison/run.mjs \
-            "${{ matrix.benchmark }}"
           if [[ "${{ runner.os }}" != "Windows" ]]; then
             chmod 755 "candidate/bin/vkf-benchmark-driver${{ matrix.target == 'windows-x64' && '.exe' || '' }}"
           fi
