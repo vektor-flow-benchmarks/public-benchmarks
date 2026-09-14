@@ -68,8 +68,12 @@ jobs:
       - name: Build optimized benchmark driver
         shell: bash
         run: |
+          extra_cmake=()
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            extra_cmake+=("-DCMAKE_CXX_FLAGS=-mxsave" "-DCMAKE_EXE_LINKER_FLAGS=-static")
+          fi
           cmake -S source/compiler/native -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release "${extra_cmake[@]}"
           cmake --build build --parallel 2 --target vkf
           "${{ matrix.binary }}" -v | grep -Fx 'VKF 0.4.5'
 
