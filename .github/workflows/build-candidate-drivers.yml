@@ -57,10 +57,9 @@ jobs:
             --repo "${{ github.repository }}" \
             --pattern "${{ inputs.source_asset }}"
           mkdir source
-          openssl enc -d -aes-256-cbc -pbkdf2 \
-            -in "${{ inputs.source_asset }}" \
-            -pass env:VKF_CANDIDATE_SOURCE_KEY \
-            | tar -xzf - -C source
+          node scripts/decrypt-candidate-source.mjs \
+            "${{ inputs.source_asset }}" source.tar.gz
+          tar -xzf source.tar.gz -C source
 
       - name: Build optimized benchmark driver
         shell: bash
