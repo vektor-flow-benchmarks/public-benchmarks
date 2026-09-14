@@ -1,0 +1,38 @@
+name: Inspect ARM64 n-body codegen
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_tag:
+        required: true
+        default: candidate-0.4.5-773b899c
+
+permissions:
+  contents: read
+
+jobs:
+  assembly:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download public benchmark source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${{ inputs.candidate_tag }}" \
+            --repo "${{ github.repository }}" \
+            --pattern benchmark-suite.tar.gz \
+            --pattern benchmark-suite.tar.gz.sha256
+          node scripts/verify-downloads.mjs benchmark-suite.tar.gz
+          mkdir suite
+          tar -xzf benchmark-suite.tar.gz -C suite
+      - name: Emit Apple ARM64 assembly
+        run: >-
+          clang++ -O3 -march=native -std=c++17
+          -ffp-contract=off -fno-fast-math
+          -S suite/benchmarks/core-comparison/published/n-body-large/cpp.cpp
+          -o nbody-apple-arm64.s
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nbody-apple-arm64-assembly
+          path: nbody-apple-arm64.s
