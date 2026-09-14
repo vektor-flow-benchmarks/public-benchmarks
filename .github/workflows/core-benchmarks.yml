@@ -37,9 +37,16 @@ jobs:
   native:
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(inputs.platform == 'all' && '{"include":[{"id":"windows-x64","os":"windows-latest","suffix":".exe"},{"id":"linux-x64","os":"ubuntu-24.04","suffix":""},{"id":"macos-arm64","os":"macos-15","suffix":""}]}' || inputs.platform == 'windows-x64' && '{"include":[{"id":"windows-x64","os":"windows-latest","suffix":".exe"}]}' || inputs.platform == 'linux-x64' && '{"include":[{"id":"linux-x64","os":"ubuntu-24.04","suffix":""}]}' || '{"include":[{"id":"macos-arm64","os":"macos-15","suffix":""}]}') }}
-    name: ${{ matrix.id }} · ${{ inputs.stage }}
-    runs-on: ${{ matrix.os }}
+      matrix:
+        target: ${{ fromJSON(inputs.platform == 'all' && '["windows-x64","linux-x64","macos-arm64"]' || inputs.platform == 'windows-x64' && '["windows-x64"]' || inputs.platform == 'linux-x64' && '["linux-x64"]' || '["macos-arm64"]') }}
+        benchmark:
+          - spectral-norm-large
+          - fannkuch-redux-large
+          - n-body-large
+          - combined-kernels-large
+          - combined-kernels-parallel-large
+    name: ${{ matrix.target }} · ${{ matrix.benchmark }} · ${{ inputs.stage }}
+    runs-on: ${{ matrix.target == 'windows-x64' && 'windows-latest' || matrix.target == 'linux-x64' && 'ubuntu-24.04' || 'macos-15' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -72,16 +79,16 @@ jobs:
             --repo "${{ github.repository }}" \
             --pattern benchmark-suite.tar.gz \
             --pattern benchmark-suite.tar.gz.sha256 \
-            --pattern "vkf-benchmark-driver-${{ matrix.id }}.tar.gz" \
-            --pattern "vkf-benchmark-driver-${{ matrix.id }}.tar.gz.sha256"
+            --pattern "vkf-benchmark-driver-${{ matrix.target }}.tar.gz" \
+            --pattern "vkf-benchmark-driver-${{ matrix.target }}.tar.gz.sha256"
           node scripts/verify-downloads.mjs \
             benchmark-suite.tar.gz \
-            "vkf-benchmark-driver-${{ matrix.id }}.tar.gz"
+            "vkf-benchmark-driver-${{ matrix.target }}.tar.gz"
           mkdir suite candidate
           tar -xzf benchmark-suite.tar.gz -C suite
-          tar -xzf "vkf-benchmark-driver-${{ matrix.id }}.tar.gz" -C candidate
+          tar -xzf "vkf-benchmark-driver-${{ matrix.target }}.tar.gz" -C candidate
           if [[ "${{ runner.os }}" != "Windows" ]]; then
-            chmod 755 "candidate/bin/vkf-benchmark-driver${{ matrix.suffix }}"
+            chmod 755 "candidate/bin/vkf-benchmark-driver${{ matrix.target == 'windows-x64' && '.exe' || '' }}"
           fi
       - name: Select acceptance stage
         shell: bash
@@ -93,13 +100,13 @@ jobs:
             echo "BENCH_RUNS=100" >> "$GITHUB_ENV"
             echo "ENFORCE_RELATIVE_GATE=false" >> "$GITHUB_ENV"
           fi
-      - name: Run five-workload comparison
+      - name: Run workload comparison
         shell: bash
         env:
-          VKF_BENCH_DRIVER: ${{ github.workspace }}/candidate/bin/vkf-benchmark-driver${{ matrix.suffix }}
+          VKF_BENCH_DRIVER: ${{ github.workspace }}/candidate/bin/vkf-benchmark-driver${{ matrix.target == 'windows-x64' && '.exe' || '' }}
         run: >-
           cd suite && node benchmarks/core-comparison/run.mjs
-          --case=spectral-norm-large,fannkuch-redux-large,n-body-large,combined-kernels-large,combined-kernels-parallel-large
+          --case=${{ matrix.benchmark }}
           --language=vkf,cpp,rust,zig
           --max-cores=2
           --compile-runs=1
@@ -111,12 +118,12 @@ jobs:
           --function-landscape-runs=0
           --enforce-relative-gate=${ENFORCE_RELATIVE_GATE}
           --relative-limit=0.5
-          --output=${{ matrix.id }}-045-${{ inputs.stage }}-${{ github.run_id }}
+          --output=${{ matrix.target }}-045-${{ inputs.stage }}-${{ matrix.benchmark }}-${{ github.run_id }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ${{ matrix.id }}-${{ inputs.stage }}
+          name: ${{ matrix.target }}-${{ matrix.benchmark }}-${{ inputs.stage }}
           if-no-files-found: warn
           path: |
-            suite/benchmarks/core-comparison/results/${{ matrix.id }}-045-${{ inputs.stage }}-${{ github.run_id }}.json
-            suite/benchmarks/core-comparison/results/${{ matrix.id }}-045-${{ inputs.stage }}-${{ github.run_id }}.md
+            suite/benchmarks/core-comparison/results/${{ matrix.target }}-045-${{ inputs.stage }}-${{ matrix.benchmark }}-${{ github.run_id }}.json
+            suite/benchmarks/core-comparison/results/${{ matrix.target }}-045-${{ inputs.stage }}-${{ matrix.benchmark }}-${{ github.run_id }}.md
