@@ -7,7 +7,7 @@ let source = readFileSync(target, 'utf8').replaceAll('\r\n', '\n');
 const compileBefore = "return ['--aot', '--optimizer-policy', 'auto', '--source', source];";
 const compileAfter = `return [
     '--aot', '--optimizer-policy', 'auto',
-    '--optimizer-runs', '1000', '--optimizer-time-limit-ms', '60000',
+    '--optimizer-runs', '10', '--optimizer-time-limit-ms', '5000',
     '--source', source
   ];`;
 const runtimeBefore = `'--optimizer-policy', reuseFunctionPolicy || optimizerPolicy === 'mixed'
@@ -16,7 +16,7 @@ const runtimeBefore = `'--optimizer-policy', reuseFunctionPolicy || optimizerPol
 const runtimeAfter = `'--optimizer-policy', reuseFunctionPolicy || optimizerPolicy === 'mixed'
       ? 'auto' : optimizerPolicy,
     ...((reuseFunctionPolicy || optimizerPolicy === 'mixed')
-      ? ['--optimizer-runs', '1000', '--optimizer-time-limit-ms', '60000']
+      ? ['--optimizer-runs', '10', '--optimizer-time-limit-ms', '5000']
       : []),
     '--source', source`;
 
