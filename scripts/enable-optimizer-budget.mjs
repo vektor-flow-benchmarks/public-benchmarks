@@ -15,6 +15,10 @@ const compileAfter = `return [
     '--optimizer-time-limit-ms', '${optimizerTimeLimitMs}',
     '--source', source
   ];`;
+const compileEmbedded = `    '--optimizer-runs', '1000',
+    '--optimizer-time-limit-ms', '60000',`;
+const compileEmbeddedAfter = `    '--optimizer-runs', '${optimizerRuns}',
+    '--optimizer-time-limit-ms', '${optimizerTimeLimitMs}',`;
 const runtimeBefore = `'--optimizer-policy', reuseFunctionPolicy || optimizerPolicy === 'mixed'
       ? 'auto' : optimizerPolicy,
     '--source', source`;
@@ -25,9 +29,27 @@ const runtimeAfter = `'--optimizer-policy', reuseFunctionPolicy || optimizerPoli
           '--optimizer-time-limit-ms', '${optimizerTimeLimitMs}']
       : []),
     '--source', source`;
+const runtimeEmbedded = `? ['--optimizer-runs', '1000', '--optimizer-time-limit-ms', '60000']`;
+const runtimeEmbeddedAfter = `? ['--optimizer-runs', '${optimizerRuns}',
+          '--optimizer-time-limit-ms', '${optimizerTimeLimitMs}']`;
 
-if (!source.includes(compileBefore) || !source.includes(runtimeBefore)) {
+let compilePatched = false;
+let runtimePatched = false;
+if (source.includes(compileBefore)) {
+  source = source.replace(compileBefore, compileAfter);
+  compilePatched = true;
+} else if (source.includes(compileEmbedded)) {
+  source = source.replace(compileEmbedded, compileEmbeddedAfter);
+  compilePatched = true;
+}
+if (source.includes(runtimeBefore)) {
+  source = source.replace(runtimeBefore, runtimeAfter);
+  runtimePatched = true;
+} else if (source.includes(runtimeEmbedded)) {
+  source = source.replace(runtimeEmbedded, runtimeEmbeddedAfter);
+  runtimePatched = true;
+}
+if (!compilePatched || !runtimePatched) {
   throw new Error('benchmark harness does not match the expected candidate');
 }
-source = source.replace(compileBefore, compileAfter).replace(runtimeBefore, runtimeAfter);
 writeFileSync(target, source, 'utf8');
