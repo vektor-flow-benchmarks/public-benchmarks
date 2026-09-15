@@ -42,7 +42,7 @@ jobs:
             extra_cmake+=("-DCMAKE_CXX_FLAGS=-ffp-contract=off -fno-fast-math")
           fi
           cmake -S source/compiler/native -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "${extra_cmake[@]}"
-          cmake --build build --parallel 2 --target vkf
+          cmake --build build --parallel 2 --target vkf vkf_arm64_artifact
       - name: Diagnose public combined workload and components
         run: node scripts/diagnose-arm64-combined.mjs source build/bin/vkf diagnostic-output
       - uses: actions/upload-artifact@v4

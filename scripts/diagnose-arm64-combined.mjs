@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const finalExpression = 'fannkuch(9) + fannkuch(9) + spectral_norm() + n_body(200000)';
@@ -74,6 +74,26 @@ function main() {
       row.runStatus = run.status;
       const text = (run.stdout ?? '').trim();
       row.value = /^[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?$/.test(text) ? Number(text) : null;
+      const exported = spawnSync(join(dirname(compiler), 'vkf_arm64_artifact'),
+        ['--source', file, '--typed-ir', join(build, 'typed-ir.json')],
+        { cwd: sourceRoot, encoding: 'utf8', timeout: 120000, maxBuffer: 1024 * 1024 });
+      row.roundTrip = { compileStatus: exported.status, artifacts: {} };
+      if (exported.status === 0) {
+        for (const artifact of artifactNames) {
+          const path = join(build, artifact);
+          if (!existsSync(path)) continue;
+          const bytes = readFileSync(path);
+          row.roundTrip.artifacts[artifact] = {
+            sha256: createHash('sha256').update(bytes).digest('hex'), byteCount: bytes.length,
+          };
+        }
+        const exportedRun = spawnSync(join(build, `${name}-arm64`), [],
+          { cwd: sourceRoot, encoding: 'utf8', timeout: 120000, maxBuffer: 1024 * 1024 });
+        const exportedText = (exportedRun.stdout ?? '').trim();
+        row.roundTrip.runStatus = exportedRun.status;
+        row.roundTrip.value = /^[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?$/.test(exportedText)
+          ? Number(exportedText) : null;
+      }
     }
     report.cases.push(row);
     console.log(JSON.stringify(row));
