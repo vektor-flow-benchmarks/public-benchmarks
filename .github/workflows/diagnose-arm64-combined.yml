@@ -1,0 +1,40 @@
+name: Diagnose ARM64 combined correctness
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Private compiler full commit SHA
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: svenviktorjonsson/vektor-flow
+          ref: ${{ inputs.source_ref }}
+          ssh-key: ${{ secrets.VKF_PRIVATE_REPO_DEPLOY_KEY }}
+          persist-credentials: false
+          path: source
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build exact ARM64 compiler revision
+        run: |
+          test "$(uname -m)" = arm64
+          cmake -S source/compiler/native -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2 --target vkf
+      - name: Diagnose public combined workload and components
+        run: node scripts/diagnose-arm64-combined.mjs source build/bin/vkf diagnostic-output
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arm64-combined-diagnostic
+          if-no-files-found: error
+          path: diagnostic-output/report.json
