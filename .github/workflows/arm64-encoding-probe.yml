@@ -23,10 +23,10 @@ jobs:
               tbl v1.16b, {v1.16b}, v2.16b
               umov w10, v1.b[0]
               ins v0.b[3], w11
+              ins v0.d[1], x11
               ret
           ASM
           clang -arch arm64 -c /tmp/probe.s -o /tmp/probe.o
           otool -tvV /tmp/probe.o
-          objcopy --dump-section __TEXT,__text=/tmp/probe.bin /tmp/probe.o 2>/dev/null || \
-            dd if=/tmp/probe.o bs=1 skip=392 count=28 2>/dev/null of=/tmp/probe.bin
-          xxd -g4 /tmp/probe.bin
+          xcrun llvm-objdump --section-headers /tmp/probe.o
+          xcrun llvm-objdump -s --section=__text /tmp/probe.o
