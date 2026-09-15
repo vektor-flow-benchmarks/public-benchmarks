@@ -48,6 +48,7 @@ function main() {
   if (revision.status !== 0) throw new Error('Cannot resolve compiler source revision.');
   const report = {
     sourceRevision: revision.stdout.trim(), platform: process.platform, arch: process.arch,
+    compilerFpPolicy: process.env.VKF_DIAGNOSTIC_FP === 'strict' ? 'strict' : 'default',
     compilerSha256: createHash('sha256').update(readFileSync(compiler)).digest('hex'),
     cases: [],
   };
