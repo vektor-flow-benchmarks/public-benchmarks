@@ -106,7 +106,7 @@ jobs:
         run: |
           targets=(vkf_static_index_scalarization_test vkf_invariant_matrix_reduction_test vkf_component_cache_scope_test)
           if [[ "${{ runner.os }}" == "macOS" ]]; then
-            targets+=(vkf_arm64_encoder_test vkf_arm64_slp_test)
+            targets+=(vkf_arm64_encoder_test vkf_arm64_slp_test vkf_arm64_byte_vector_test)
           else
             targets+=(vkf_x64_slp_test vkf_invariant_matrix_execution_test vkf_strict)
           fi
