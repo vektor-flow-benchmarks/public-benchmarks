@@ -3,10 +3,11 @@
 This repository runs the public Vektor Flow performance contract on standard
 GitHub-hosted Linux x64, Windows x64, and macOS ARM64 runners.
 
-It intentionally contains no Vektor Flow compiler implementation source.
-Workflows consume checksum-locked compiler candidate binaries, public benchmark
-workloads, and the public benchmark harness. Numeric reports are uploaded as
-workflow artifacts.
+It intentionally contains no Vektor Flow compiler implementation source. A
+workflow checks out a requested private compiler commit into an ephemeral
+GitHub-hosted runner, builds it, executes the public benchmark contract, and
+uploads numeric reports only. Neither the checkout nor the standard-library
+sources are published as artifacts.
 
 ## Acceptance contract
 
@@ -21,18 +22,14 @@ workflow artifacts.
 - Stage 2: 100 measured samples for correctness and stability after stage 1
   passes; it has no performance threshold.
 
-## Candidate bundles
+## Candidate execution
 
-The native workflow reads these assets from a candidate release in this
-repository:
+The native workflow accepts a private branch or full commit SHA. Each selected
+operating system builds that exact revision once and then runs all five
+workloads on the same host. The public result contains only JSON and Markdown
+reports.
 
-- `benchmark-suite.tar.gz`
-- `vkf-benchmark-driver-linux-x64.tar.gz`
-- `vkf-benchmark-driver-windows-x64.tar.gz`
-- `vkf-benchmark-driver-macos-arm64.tar.gz`
-- one adjacent `.sha256` file for every archive
-
-Compiler candidates are executable artifacts only. The workflows never clone
-or receive the private implementation repository.
+The private deploy key is read-only and credentials are not persisted after
+checkout. Workflow artifact paths explicitly include reports only.
 
 Vektor Flow documentation and downloads: <https://vektorflow.org>

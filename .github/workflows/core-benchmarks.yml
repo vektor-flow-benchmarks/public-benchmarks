@@ -3,10 +3,10 @@ name: Native benchmark matrix
 on:
   workflow_dispatch:
     inputs:
-      candidate_tag:
-        description: Candidate release containing the source-free driver bundles
+      source_ref:
+        description: Private compiler branch or full commit SHA
         required: true
-        default: candidate-0.4.6
+        default: release/0.4.6-general-optimizer
       stage:
         description: Acceptance stage
         required: true
@@ -25,81 +25,80 @@ on:
           - windows-x64
           - linux-x64
           - macos-arm64
-      paired_combined:
-        description: Run serial and parallel combined workloads on the same host
-        required: true
-        default: false
-        type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: native-${{ inputs.candidate_tag }}-${{ inputs.stage }}-${{ inputs.platform }}
+  group: native-${{ inputs.source_ref }}-${{ inputs.stage }}-${{ inputs.platform }}
   cancel-in-progress: false
 
 jobs:
   native:
-    env:
-      BENCHMARK_OUTPUT: ${{ inputs.paired_combined && 'combined-pair' || matrix.benchmark }}
     strategy:
       fail-fast: false
       matrix:
         target: ${{ fromJSON(inputs.platform == 'all' && '["windows-x64","linux-x64","macos-arm64"]' || inputs.platform == 'windows-x64' && '["windows-x64"]' || inputs.platform == 'linux-x64' && '["linux-x64"]' || '["macos-arm64"]') }}
-        benchmark: ${{ fromJSON(inputs.paired_combined && '["combined-kernels-large,combined-kernels-parallel-large"]' || '["spectral-norm-large","fannkuch-redux-large","n-body-large","combined-kernels-large","combined-kernels-parallel-large"]') }}
-    name: ${{ matrix.target }} · ${{ matrix.benchmark }} · ${{ inputs.stage }}
+    name: ${{ matrix.target }} · ${{ inputs.stage }}
     runs-on: ${{ matrix.target == 'windows-x64' && 'windows-latest' || matrix.target == 'linux-x64' && 'ubuntu-24.04' || 'macos-15' }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out public runner
+        uses: actions/checkout@v4
+
+      - name: Check out private compiler candidate
+        uses: actions/checkout@v4
+        with:
+          repository: svenviktorjonsson/vektor-flow
+          ref: ${{ inputs.source_ref }}
+          ssh-key: ${{ secrets.VKF_PRIVATE_REPO_DEPLOY_KEY }}
+          persist-credentials: false
+          path: source
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
+
       - name: Install Rust 1.98.0
         shell: bash
         run: |
           rustup toolchain install 1.98.0 --profile minimal
           rustup default 1.98.0
+
       - name: Install Windows Clang
         if: runner.os == 'Windows'
         shell: pwsh
         run: choco install llvm --yes --no-progress
+
       - name: Install Linux Clang
         if: runner.os == 'Linux'
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends clang build-essential
-      - name: Download source-free benchmark inputs
-        env:
-          GH_TOKEN: ${{ github.token }}
+          sudo apt-get install --yes --no-install-recommends clang build-essential cmake ninja-build
+
+      - name: Verify runner architecture
         shell: bash
         run: |
-          gh release download "${{ inputs.candidate_tag }}" \
-            --repo "${{ github.repository }}" \
-            --pattern benchmark-suite.tar.gz \
-            --pattern benchmark-suite.tar.gz.sha256 \
-            --pattern benchmark-suite-overlay.tar.gz \
-            --pattern benchmark-suite-overlay.tar.gz.sha256
-          gh release download "${{ inputs.candidate_tag }}" \
-            --repo "${{ github.repository }}" \
-            --pattern "vkf-benchmark-driver-${{ matrix.target }}-overlay.tar.gz" \
-            --pattern "vkf-benchmark-driver-${{ matrix.target }}-overlay.tar.gz.sha256"
-          node scripts/verify-downloads.mjs \
-            benchmark-suite.tar.gz \
-            benchmark-suite-overlay.tar.gz
-          mkdir suite candidate
-          tar -xzf benchmark-suite.tar.gz -C suite
-          tar -xzf benchmark-suite-overlay.tar.gz -C suite
-          node scripts/verify-downloads.mjs \
-            "vkf-benchmark-driver-${{ matrix.target }}-overlay.tar.gz"
-          tar -xzf "vkf-benchmark-driver-${{ matrix.target }}-overlay.tar.gz" \
-            -C candidate
-          if [[ "${{ runner.os }}" != "Windows" ]]; then
-            chmod 755 "candidate/bin/vkf-benchmark-driver${{ matrix.target == 'windows-x64' && '.exe' || '' }}"
+          expected="${{ matrix.target == 'macos-arm64' && 'arm64' || 'x86_64' }}"
+          test "$(uname -m)" = "$expected"
+
+      - name: Build optimized private candidate
+        shell: bash
+        run: |
+          extra_cmake=()
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            extra_cmake+=("-DCMAKE_CXX_FLAGS=-mxsave" "-DCMAKE_EXE_LINKER_FLAGS=-static")
           fi
+          cmake -S source/compiler/native -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release "${extra_cmake[@]}"
+          cmake --build build --parallel 2 --target vkf
+          "build/bin/vkf${{ runner.os == 'Windows' && '.exe' || '' }}" -v \
+            | grep -Fx 'VKF 0.4.6'
+
       - name: Select acceptance stage
         shell: bash
         run: |
@@ -110,30 +109,44 @@ jobs:
             echo "BENCH_RUNS=100" >> "$GITHUB_ENV"
             echo "ENFORCE_RELATIVE_GATE=false" >> "$GITHUB_ENV"
           fi
-      - name: Run workload comparison
+
+      - name: Run all five workload comparisons
         shell: bash
         env:
-          VKF_BENCH_DRIVER: ${{ github.workspace }}/candidate/bin/vkf-benchmark-driver${{ matrix.target == 'windows-x64' && '.exe' || '' }}
-        run: >-
-          cd suite && node benchmarks/core-comparison/run.mjs
-          --case=${{ matrix.benchmark }}
-          --language=vkf,cpp,rust,zig
-          --max-cores=2
-          --compile-runs=1
-          --compile-warmups=1
-          --runs=${BENCH_RUNS}
-          --warmups=10
-          --process-runs=1
-          --process-warmups=1
-          --function-landscape-runs=0
-          --enforce-relative-gate=${ENFORCE_RELATIVE_GATE}
-          --relative-limit=0.5
-          --output=${{ matrix.target }}-046-${{ inputs.stage }}-${BENCHMARK_OUTPUT}-${{ github.run_id }}
+          VKF_BENCH_DRIVER: ${{ github.workspace }}/build/bin/vkf${{ runner.os == 'Windows' && '.exe' || '' }}
+        run: |
+          status=0
+          cd source
+          for benchmark in \
+            spectral-norm-large \
+            fannkuch-redux-large \
+            n-body-large \
+            combined-kernels-large \
+            combined-kernels-parallel-large
+          do
+            node benchmarks/core-comparison/run.mjs \
+              --case="$benchmark" \
+              --language=vkf,cpp,rust,zig \
+              --max-cores=2 \
+              --compile-runs=1 \
+              --compile-warmups=1 \
+              --runs="${BENCH_RUNS}" \
+              --warmups=10 \
+              --process-runs=1 \
+              --process-warmups=1 \
+              --function-landscape-runs=0 \
+              --enforce-relative-gate="${ENFORCE_RELATIVE_GATE}" \
+              --relative-limit=0.5 \
+              --output="${{ matrix.target }}-046-${{ inputs.stage }}-${benchmark}-${{ github.run_id }}" \
+              || status=1
+          done
+          exit "$status"
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ${{ matrix.target }}-${{ matrix.benchmark }}-${{ inputs.stage }}
+          name: ${{ matrix.target }}-${{ inputs.stage }}
           if-no-files-found: warn
           path: |
-            suite/benchmarks/core-comparison/results/${{ matrix.target }}-046-${{ inputs.stage }}-${{ env.BENCHMARK_OUTPUT }}-${{ github.run_id }}.json
-            suite/benchmarks/core-comparison/results/${{ matrix.target }}-046-${{ inputs.stage }}-${{ env.BENCHMARK_OUTPUT }}-${{ github.run_id }}.md
+            source/benchmarks/core-comparison/results/${{ matrix.target }}-046-${{ inputs.stage }}-*-${{ github.run_id }}.json
+            source/benchmarks/core-comparison/results/${{ matrix.target }}-046-${{ inputs.stage }}-*-${{ github.run_id }}.md
