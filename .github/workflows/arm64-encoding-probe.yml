@@ -1,0 +1,32 @@
+name: ARM64 encoding probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  encode:
+    runs-on: macos-14
+    steps:
+      - name: Assemble and print verified instruction words
+        shell: bash
+        run: |
+          cat > /tmp/probe.s <<'ASM'
+          .text
+          .globl _probe
+          _probe:
+              movi v0.16b, #0
+              mov v1.16b, v0.16b
+              ldr q2, [x9]
+              tbl v1.16b, {v1.16b}, v2.16b
+              umov w10, v1.b[0]
+              ins v0.b[3], w11
+              ret
+          ASM
+          clang -arch arm64 -c /tmp/probe.s -o /tmp/probe.o
+          otool -tvV /tmp/probe.o
+          objcopy --dump-section __TEXT,__text=/tmp/probe.bin /tmp/probe.o 2>/dev/null || \
+            dd if=/tmp/probe.o bs=1 skip=392 count=28 2>/dev/null of=/tmp/probe.bin
+          xxd -g4 /tmp/probe.bin
