@@ -99,6 +99,30 @@ jobs:
           "build/bin/vkf${{ runner.os == 'Windows' && '.exe' || '' }}" -v \
             | grep -Fx 'VKF 0.4.6'
 
+      - name: Verify general lowering and runtime correctness
+        shell: bash
+        env:
+          VKF_BYTE_VECTOR_DRIVER: ${{ github.workspace }}/build/bin/vkf-strict${{ runner.os == 'Windows' && '.exe' || '' }}
+        run: |
+          targets=(vkf_static_index_scalarization_test vkf_invariant_matrix_reduction_test)
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            targets+=(vkf_arm64_encoder_test vkf_arm64_slp_test)
+          else
+            targets+=(vkf_x64_slp_test vkf_invariant_matrix_execution_test vkf_strict)
+          fi
+          cmake --build build --parallel 2 --target "${targets[@]}"
+          for target in "${targets[@]}"; do
+            if [[ "$target" == "vkf_strict" ]]; then continue; fi
+            "build/bin/${target}${{ runner.os == 'Windows' && '.exe' || '' }}"
+          done
+          cd source
+          node --test tests/js/general-optimization-only.test.mjs \
+            benchmarks/core-comparison/run.test.mjs \
+            tests/bootstrap/wasm-retired-algorithms.test.mjs
+          if [[ "${{ runner.os }}" != "macOS" ]]; then
+            node --test tests/compiler/native-byte-vector-registers.test.mjs
+          fi
+
       - name: Select acceptance stage
         shell: bash
         run: |
