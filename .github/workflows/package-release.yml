@@ -1,0 +1,182 @@
+name: Package Vektor Flow 0.4.5
+
+on:
+  workflow_dispatch:
+    inputs:
+      private_ref:
+        description: Private Vektor Flow ref to package
+        required: true
+        default: candidate-driver-0.4.5
+
+permissions:
+  contents: write
+
+concurrency:
+  group: package-vektor-flow-0.4.5
+  cancel-in-progress: false
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: svenviktorjonsson/vektor-flow
+          ref: ${{ inputs.private_ref }}
+          ssh-key: ${{ secrets.VKF_PRIVATE_REPO_DEPLOY_KEY }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Install build tools
+        shell: pwsh
+        run: choco install llvm nsis --yes --no-progress
+      - name: Build and test the compiler
+        shell: pwsh
+        run: |
+          .\scripts\build-native-compiler.ps1 -OnlyTargets @("vkf-strict", "vkf_symbolic_kernel_artifact", "vkf_linalg_factor_x64_test", "vkf_pe_writer_capacity_test", "vkf_wasm_artifact_smoke", "vkf_webgpu_artifact_smoke")
+          .\scripts\build-native-ui-package.ps1
+          .\build\native-compiler-clang\bin\vkf_linalg_factor_x64_test.exe
+          .\build\native-compiler-clang\bin\vkf_pe_writer_capacity_test.exe
+          .\build\native-compiler-clang\bin\vkf-strict.exe -t tests/vkf
+          .\build\native-compiler-clang\bin\vkf-strict.exe -t tests/stdlib
+      - name: Package Windows 0.4.5
+        shell: pwsh
+        run: |
+          .\scripts\package-native-release.ps1 -Version 0.4.5 -UiBinaryDirectory build/v
+          .\scripts\build-windows-installer.ps1 -Version 0.4.5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-release
+          if-no-files-found: error
+          path: |
+            dist/releases/vektor-flow-windows-x64.zip
+            dist/releases/vektor-flow-windows-x64.zip.sha256
+            dist/releases/vektor-flow-windows-x64-setup.exe
+            dist/releases/vektor-flow-windows-x64-setup.exe.sha256
+
+  linux-x64:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: svenviktorjonsson/vektor-flow
+          ref: ${{ inputs.private_ref }}
+          ssh-key: ${{ secrets.VKF_PRIVATE_REPO_DEPLOY_KEY }}
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends build-essential cmake ninja-build
+      - name: Build and test the compiler
+        run: |
+          cmake -S compiler/native -B build/native-compiler -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/native-compiler --parallel 2 --target vkf_strict vkf_symbolic_kernel_artifact
+          build/native-compiler/bin/vkf-strict -t tests/vkf
+          build/native-compiler/bin/vkf-strict -t tests/stdlib
+          VKF_NATIVE_BIN=build/native-compiler/bin node tools/verify-stdlib-wasm.mjs
+      - name: Package Linux 0.4.5
+        run: |
+          chmod +x scripts/package-native-release.sh
+          scripts/package-native-release.sh 0.4.5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64-release
+          if-no-files-found: error
+          path: |
+            dist/releases/vektor-flow-linux-x64.tar.gz
+            dist/releases/vektor-flow-linux-x64.tar.gz.sha256
+            dist/releases/vektor-flow-linux-x64.deb
+            dist/releases/vektor-flow-linux-x64.deb.sha256
+
+  macos-arm64:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: svenviktorjonsson/vektor-flow
+          ref: ${{ inputs.private_ref }}
+          ssh-key: ${{ secrets.VKF_PRIVATE_REPO_DEPLOY_KEY }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Build and test the compiler
+        run: |
+          test "$(uname -m)" = arm64
+          cmake -S compiler/native -B build/native-compiler -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/native-compiler --parallel 2 --target vkf_strict vkf_symbolic_kernel_artifact
+          build/native-compiler/bin/vkf-strict -t tests/vkf
+          build/native-compiler/bin/vkf-strict -t tests/stdlib
+          VKF_NATIVE_BIN=build/native-compiler/bin node tools/verify-stdlib-wasm.mjs
+      - name: Package macOS 0.4.5
+        run: |
+          chmod +x scripts/package-native-release-macos.sh packaging/macos/install.sh
+          scripts/package-native-release-macos.sh 0.4.5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-release
+          if-no-files-found: error
+          path: |
+            dist/releases/vektor-flow-macos-arm64.tar.gz
+            dist/releases/vektor-flow-macos-arm64.tar.gz.sha256
+            dist/releases/vektor-flow-macos-arm64.pkg
+            dist/releases/vektor-flow-macos-arm64.pkg.sha256
+
+  browser-wasm:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: svenviktorjonsson/vektor-flow
+          ref: ${{ inputs.private_ref }}
+          ssh-key: ${{ secrets.VKF_PRIVATE_REPO_DEPLOY_KEY }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Build and verify browser compilers
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends build-essential cmake ninja-build zip
+          npm ci
+          cmake -S compiler/native -B build/native-compiler -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/native-compiler --parallel 2 --target vkf_strict vkf_symbolic_kernel_artifact
+          VKF_NATIVE_BIN=build/native-compiler/bin npm run build:browser-compiler
+          docker run --rm -v "$GITHUB_WORKSPACE:/src" -w /src emscripten/emsdk:4.0.14 bash scripts/build-shared-compiler.sh
+          cmp build/shared-compiler/vkf-compiler.wasm web/playground/artifacts/vkf-shared-compiler.wasm
+          VKF_NATIVE_COMPILER=build/native-compiler/bin/vkf-strict node --test tests/js/browser-compiler-runtime.test.mjs tests/js/browser-compiler-release.test.mjs
+      - name: Package browser WebAssembly 0.4.5
+        run: |
+          mkdir -p dist/releases/vektor-flow-browser-wasm
+          node tools/package-browser-compiler.mjs --output=dist/releases/vektor-flow-browser-wasm
+          cd dist/releases
+          zip -X -r vektor-flow-browser-wasm.zip vektor-flow-browser-wasm
+          sha256sum vektor-flow-browser-wasm.zip > vektor-flow-browser-wasm.zip.sha256
+          cp vektor-flow-browser-wasm/artifacts/vkf-shared-compiler.wasm vkf-shared-compiler.wasm
+          sha256sum vkf-shared-compiler.wasm > vkf-shared-compiler.wasm.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browser-wasm-release
+          if-no-files-found: error
+          path: |
+            dist/releases/vektor-flow-browser-wasm.zip
+            dist/releases/vektor-flow-browser-wasm.zip.sha256
+            dist/releases/vkf-shared-compiler.wasm
+            dist/releases/vkf-shared-compiler.wasm.sha256
+
+  publish:
+    needs: [windows-x64, linux-x64, macos-arm64, browser-wasm]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+          pattern: "*-release"
+          merge-multiple: true
+      - name: Publish source-free 0.4.5 assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view v0.4.5 >/dev/null 2>&1; then
+            gh release upload v0.4.5 dist/* --clobber
+          else
+            gh release create v0.4.5 dist/* --title "Vektor Flow 0.4.5" --notes "Source-free compiler packages and checksums for Vektor Flow 0.4.5."
+          fi
