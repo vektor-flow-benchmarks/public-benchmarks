@@ -6,11 +6,11 @@ on:
       candidate_tag:
         description: Candidate release to read and update
         required: true
-        default: candidate-0.4.5
+        default: candidate-0.4.6
       source_ref:
         description: Private compiler candidate branch or commit
         required: true
-        default: candidate-driver-0.4.5
+        default: release/0.4.6-general-optimizer
 
 permissions:
   contents: write
@@ -75,7 +75,7 @@ jobs:
           cmake -S source/compiler/native -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release "${extra_cmake[@]}"
           cmake --build build --parallel 2 --target vkf
-          "${{ matrix.binary }}" -v | grep -Fx 'VKF 0.4.5'
+          "${{ matrix.binary }}" -v | grep -Fx 'VKF 0.4.6'
 
       - name: Package source-free overlay
         shell: bash

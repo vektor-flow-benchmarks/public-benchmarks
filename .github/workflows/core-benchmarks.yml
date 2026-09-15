@@ -6,7 +6,7 @@ on:
       candidate_tag:
         description: Candidate release containing the source-free driver bundles
         required: true
-        default: candidate-0.4.5
+        default: candidate-0.4.6
       stage:
         description: Acceptance stage
         required: true
@@ -128,12 +128,12 @@ jobs:
           --function-landscape-runs=0
           --enforce-relative-gate=${ENFORCE_RELATIVE_GATE}
           --relative-limit=0.5
-          --output=${{ matrix.target }}-045-${{ inputs.stage }}-${BENCHMARK_OUTPUT}-${{ github.run_id }}
+          --output=${{ matrix.target }}-046-${{ inputs.stage }}-${BENCHMARK_OUTPUT}-${{ github.run_id }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: ${{ matrix.target }}-${{ matrix.benchmark }}-${{ inputs.stage }}
           if-no-files-found: warn
           path: |
-            suite/benchmarks/core-comparison/results/${{ matrix.target }}-045-${{ inputs.stage }}-${{ env.BENCHMARK_OUTPUT }}-${{ github.run_id }}.json
-            suite/benchmarks/core-comparison/results/${{ matrix.target }}-045-${{ inputs.stage }}-${{ env.BENCHMARK_OUTPUT }}-${{ github.run_id }}.md
+            suite/benchmarks/core-comparison/results/${{ matrix.target }}-046-${{ inputs.stage }}-${{ env.BENCHMARK_OUTPUT }}-${{ github.run_id }}.json
+            suite/benchmarks/core-comparison/results/${{ matrix.target }}-046-${{ inputs.stage }}-${{ env.BENCHMARK_OUTPUT }}-${{ github.run_id }}.md
