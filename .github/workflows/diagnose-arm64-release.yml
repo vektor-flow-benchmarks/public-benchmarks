@@ -1,0 +1,65 @@
+name: Diagnose ARM64 release surface
+
+on:
+  workflow_dispatch:
+    inputs:
+      private_ref:
+        description: Private Vektor Flow ref to diagnose
+        required: true
+        default: candidate-driver-0.4.5
+
+permissions:
+  contents: read
+
+jobs:
+  macos-arm64:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: svenviktorjonsson/vektor-flow
+          ref: ${{ inputs.private_ref }}
+          ssh-key: ${{ secrets.VKF_PRIVATE_REPO_DEPLOY_KEY }}
+      - name: Build ARM64 compiler
+        run: |
+          test "$(uname -m)" = arm64
+          cmake -S compiler/native -B build/native-compiler -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/native-compiler --parallel 2 --target vkf_strict
+      - name: Print failing surface values
+        shell: bash
+        run: |
+          set +e
+          compiler=build/native-compiler/bin/vkf-strict
+          run_case() {
+            name="$1"
+            source="$2"
+            file="$RUNNER_TEMP/$name.vkf"
+            output="$RUNNER_TEMP/$name"
+            printf '%s\n' "$source" > "$file"
+            echo "--- $name source ---"
+            printf '%s\n' "$source"
+            "$compiler" -b "$file" -o "$output"
+            compile_status=$?
+            echo "compile_status=$compile_status"
+            if [ "$compile_status" -eq 0 ]; then
+              echo "--- $name output ---"
+              "$output"
+              echo "run_status=$?"
+            fi
+          }
+          run_case string_ascii ':: "ab" >> $ & $'
+          run_case string_unicode ':: "åA" >> $ & $'
+          run_case string_decode4 ':: "😀" >> $ > chr(65535)? "A"; "B"'
+          run_case string_encode4 ':: "x" >> chr(128512)'
+          run_case multiset ':: {1:2, 2:1} >> $ * 2'
+          run_case string_break '_string_before_c(value:str) -> str:
+              value >>
+                  $ == chr(99)?
+                      @|
+                  $
+          :: _string_before_c("abcd")'
+          run_case time_utc ':.time
+          :: format_time(0, "%Y-%m-%dT%H:%M:%SZ", true)'
+          run_case time_local ':.time
+          :: current_time("%Y")'
+
