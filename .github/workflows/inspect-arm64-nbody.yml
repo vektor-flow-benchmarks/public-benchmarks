@@ -3,9 +3,9 @@ name: Inspect ARM64 n-body codegen
 on:
   workflow_dispatch:
     inputs:
-      candidate_tag:
+      source_ref:
         required: true
-        default: candidate-0.4.5-773b899c
+        default: release/0.4.6-general-optimizer
 
 permissions:
   contents: read
@@ -15,22 +15,19 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - name: Download public benchmark source
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release download "${{ inputs.candidate_tag }}" \
-            --repo "${{ github.repository }}" \
-            --pattern benchmark-suite.tar.gz \
-            --pattern benchmark-suite.tar.gz.sha256
-          node scripts/verify-downloads.mjs benchmark-suite.tar.gz
-          mkdir suite
-          tar -xzf benchmark-suite.tar.gz -C suite
+      - name: Check out private compiler candidate
+        uses: actions/checkout@v4
+        with:
+          repository: svenviktorjonsson/vektor-flow
+          ref: ${{ inputs.source_ref }}
+          ssh-key: ${{ secrets.VKF_PRIVATE_REPO_DEPLOY_KEY }}
+          persist-credentials: false
+          path: source
       - name: Emit Apple ARM64 assembly
         run: >-
           clang++ -O3 -march=native -std=c++17
           -ffp-contract=off -fno-fast-math
-          -S suite/benchmarks/core-comparison/published/n-body-large/cpp.cpp
+          -S source/benchmarks/core-comparison/published/n-body-large/cpp.cpp
           -o nbody-apple-arm64.s
       - uses: actions/upload-artifact@v4
         with:
