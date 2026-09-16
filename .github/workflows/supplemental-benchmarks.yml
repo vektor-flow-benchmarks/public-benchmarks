@@ -70,7 +70,11 @@ jobs:
 
       - name: Build verified compiler revision
         shell: pwsh
-        run: .\scripts\build-native-compiler.ps1 -OnlyTargets @("vkf-strict")
+        run: .\scripts\build-native-compiler.ps1 -OnlyTargets @("vkf-strict", "vkf_x64_slp_test")
+
+      - name: Run native x64 regressions
+        shell: pwsh
+        run: .\build\native-compiler-clang\bin\vkf_x64_slp_test.exe
 
       - name: Build linear-algebra VKF runners
         shell: pwsh
@@ -84,6 +88,7 @@ jobs:
           include-hidden-files: true
           path: |
             source/build/native-compiler-clang/bin/vkf-strict.exe
+            source/build/native-compiler-clang/bin/vkf_x64_slp_test.exe
             source/.work/linalg-vkf-release/*.vkf
             source/source-receipt.json
           if-no-files-found: warn
