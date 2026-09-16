@@ -169,7 +169,7 @@ jobs:
           cmake --build .work/symengine-build --parallel 2
           cmake -S benchmarks/symbolic-comparison/competitors -B .work/symengine-runner -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DSymEngine_DIR="$GITHUB_WORKSPACE/.work/symengine-build" \
+            -DSymEngine_DIR="$GITHUB_WORKSPACE/source/.work/symengine-build" \
             -DBoost_DIR="$GITHUB_WORKSPACE/source/benchmarks/symbolic-comparison/cmake" \
             -DBOOST_ROOT=/tmp/boost_1_86_0
           cmake --build .work/symengine-runner --parallel 2
