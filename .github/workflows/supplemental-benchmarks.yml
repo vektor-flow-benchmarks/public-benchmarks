@@ -223,7 +223,6 @@ jobs:
           --julia=julia
           --julia-project=benchmarks/symbolic-comparison/julia
           --runs=${{ inputs.stage == 'stage1' && '10' || '100' }}
-          --timeout-ms=30000
           --relative-limit=1.0
           --enforce-relative-gate=${{ inputs.stage == 'stage1' && 'true' || 'false' }}
           --output=benchmarks/symbolic-comparison/results/linux-x64-046-${{ inputs.stage }}-${{ github.run_id }}.json
