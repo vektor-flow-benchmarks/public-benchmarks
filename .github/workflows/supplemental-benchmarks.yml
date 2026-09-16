@@ -135,7 +135,7 @@ jobs:
   symbolic-comparison-linux-x64:
     if: inputs.suite == 'all' || inputs.suite == 'symbolic'
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: ${{ inputs.stage == 'stage1' && 90 || 360 }}
     defaults:
       run:
         working-directory: source
@@ -217,6 +217,7 @@ jobs:
           node benchmarks/symbolic-comparison/run.mjs
           --compiler=build/native-compiler/bin/vkf-strict
           --languages=vkf,symengine,sympy,symbolics
+          --timeout-ms=180000
           --symengine=.work/symengine-runner/symengine_runner
           --python=python
           --julia=julia
