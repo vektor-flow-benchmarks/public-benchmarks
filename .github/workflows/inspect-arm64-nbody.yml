@@ -24,12 +24,18 @@ jobs:
           persist-credentials: false
           path: source
       - name: Emit Apple ARM64 assembly
-        run: >-
-          clang++ -O3 -march=native -std=c++17
-          -ffp-contract=off -fno-fast-math
-          -S source/benchmarks/core-comparison/published/n-body-large/cpp.cpp
-          -o nbody-apple-arm64.s
+        run: |
+          clang++ -O3 -march=native -std=c++17 \
+            -ffp-contract=off -fno-fast-math \
+            -S source/benchmarks/core-comparison/published/n-body-large/cpp.cpp \
+            -o nbody-apple-arm64.s
+          clang++ -O3 -march=native -std=c++17 \
+            -ffp-contract=off -fno-fast-math \
+            -S source/benchmarks/core-comparison/published/fannkuch-redux-large/cpp.cpp \
+            -o fannkuch-apple-arm64.s
       - uses: actions/upload-artifact@v4
         with:
-          name: nbody-apple-arm64-assembly
-          path: nbody-apple-arm64.s
+          name: core-apple-arm64-assembly
+          path: |
+            nbody-apple-arm64.s
+            fannkuch-apple-arm64.s
