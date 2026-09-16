@@ -164,13 +164,13 @@ jobs:
             -DINTEGER_CLASS=boostmp \
             -DBUILD_TESTS=OFF \
             -DBUILD_BENCHMARKS=OFF \
-            -DBoost_DIR="$GITHUB_WORKSPACE/benchmarks/symbolic-comparison/cmake" \
+            -DBoost_DIR="$GITHUB_WORKSPACE/source/benchmarks/symbolic-comparison/cmake" \
             -DBOOST_ROOT=/tmp/boost_1_86_0
           cmake --build .work/symengine-build --parallel 2
           cmake -S benchmarks/symbolic-comparison/competitors -B .work/symengine-runner -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DSymEngine_DIR="$GITHUB_WORKSPACE/.work/symengine-build" \
-            -DBoost_DIR="$GITHUB_WORKSPACE/benchmarks/symbolic-comparison/cmake" \
+            -DBoost_DIR="$GITHUB_WORKSPACE/source/benchmarks/symbolic-comparison/cmake" \
             -DBOOST_ROOT=/tmp/boost_1_86_0
           cmake --build .work/symengine-runner --parallel 2
 
@@ -241,6 +241,7 @@ jobs:
           docker run --rm -v "$GITHUB_WORKSPACE/source:/src" -w /src \
             emscripten/emsdk:4.0.14 bash scripts/build-shared-compiler.sh
           cp build/shared-compiler/vkf-compiler.wasm web/playground/artifacts/vkf-shared-compiler.wasm
+          node -e "const fs=require('node:fs');const m=new WebAssembly.Module(fs.readFileSync('build/shared-compiler/vkf-compiler.wasm'));console.log(JSON.stringify(WebAssembly.Module.imports(m)));"
       - name: Materialize identical browser inputs
         run: |
           docker build -f benchmarks/core-comparison/Dockerfile.wasm-browser-artifacts -t vkf-wasm-browser-artifacts .
@@ -255,6 +256,13 @@ jobs:
           name: same-revision-wasm-inputs
           path: ${{ runner.temp }}/wasm-artifacts
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rebuilt-browser-compiler
+          path: source/build/shared-compiler/vkf-compiler.wasm
+          if-no-files-found: warn
+          retention-days: 1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
