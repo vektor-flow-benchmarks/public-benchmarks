@@ -81,6 +81,7 @@ jobs:
         if: always()
         with:
           name: linalg-compiler-diagnostics
+          include-hidden-files: true
           path: |
             source/build/native-compiler-clang/bin/vkf-strict.exe
             source/.work/linalg-vkf-release/*.vkf
