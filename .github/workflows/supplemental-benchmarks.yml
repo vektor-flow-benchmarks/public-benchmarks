@@ -1,0 +1,350 @@
+name: Supplemental benchmark gates
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Full private compiler commit SHA
+        required: true
+      stage:
+        description: Acceptance stage
+        required: true
+        default: stage1
+        type: choice
+        options:
+          - stage1
+          - stage2
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supplemental-${{ inputs.source_ref }}-${{ inputs.stage }}
+  cancel-in-progress: false
+
+jobs:
+  linalg-windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: source
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: svenviktorjonsson/vektor-flow
+          ref: ${{ inputs.source_ref }}
+          ssh-key: ${{ secrets.VKF_PRIVATE_REPO_DEPLOY_KEY }}
+          persist-credentials: false
+          path: source
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify source revision
+        env:
+          EXPECTED_SHA: ${{ inputs.source_ref }}
+        run: >-
+          node -e "const cp=require('node:child_process'),fs=require('node:fs');
+          const sha=cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
+          if(!/^[0-9a-f]{40}$/.test(process.env.EXPECTED_SHA)||sha!==process.env.EXPECTED_SHA)
+          throw Error('compiler revision mismatch');
+          fs.writeFileSync('source-receipt.json',JSON.stringify({sourceRevision:sha,
+          sourceModified:cp.execFileSync('git',['status','--porcelain','--untracked-files=no'],{encoding:'utf8'}).trim()!==''}));"
+
+      - name: Install native benchmark tools
+        shell: pwsh
+        run: choco install llvm --yes --no-progress
+
+      - name: Build verified compiler revision
+        shell: pwsh
+        run: .\scripts\build-native-compiler.ps1 -OnlyTargets @("vkf-strict")
+
+      - name: Build pinned linear-algebra competitors
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check -r benchmarks/linalg-comparison/requirements.txt
+          cmake -S benchmarks/linalg-comparison/competitors/eigen -B .work/linalg-eigen -DCMAKE_BUILD_TYPE=Release
+          cmake --build .work/linalg-eigen --config Release --parallel 2
+          cargo build --release --manifest-path benchmarks/linalg-comparison/competitors/faer/Cargo.toml
+          node benchmarks/linalg-comparison/build-vkf-runners.mjs --compiler=build/native-compiler-clang/bin/vkf-strict.exe --output=.work/linalg-vkf-release
+
+      - name: Run release-tier linear-algebra comparison
+        shell: pwsh
+        run: >-
+          node benchmarks/linalg-comparison/run.mjs
+          --languages=vkf,eigen,faer,scipy
+          --runs=${{ inputs.stage == 'stage1' && '10' || '100' }}
+          --threads=1
+          --vkf-manifest=.work/linalg-vkf-release/manifest.json
+          --eigen=.work/linalg-eigen/Release/vkf-linalg-eigen.exe
+          --faer=benchmarks/linalg-comparison/competitors/faer/target/release/vkf-linalg-faer-runner.exe
+          --python=python
+          --relative-limit=1.0
+          --enforce-relative-gate=${{ inputs.stage == 'stage1' && 'true' || 'false' }}
+          --output=benchmarks/linalg-comparison/results/windows-x64-046-${{ inputs.stage }}-${{ github.run_id }}.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-x64-linalg-comparison-proof
+          path: |
+            source/benchmarks/linalg-comparison/results/windows-x64-046-${{ inputs.stage }}-${{ github.run_id }}.json
+            source/benchmarks/linalg-comparison/results/windows-x64-046-${{ inputs.stage }}-${{ github.run_id }}.md
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ github.job }}-source-receipt
+          path: source/source-receipt.json
+          if-no-files-found: error
+
+  symbolic-comparison-linux-x64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: source
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: svenviktorjonsson/vektor-flow
+          ref: ${{ inputs.source_ref }}
+          ssh-key: ${{ secrets.VKF_PRIVATE_REPO_DEPLOY_KEY }}
+          persist-credentials: false
+          path: source
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.12.6"
+
+      - name: Verify source revision
+        env:
+          EXPECTED_SHA: ${{ inputs.source_ref }}
+        run: >-
+          node -e "const cp=require('node:child_process'),fs=require('node:fs');
+          const sha=cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
+          if(!/^[0-9a-f]{40}$/.test(process.env.EXPECTED_SHA)||sha!==process.env.EXPECTED_SHA)
+          throw Error('compiler revision mismatch');
+          fs.writeFileSync('source-receipt.json',JSON.stringify({sourceRevision:sha,
+          sourceModified:cp.execFileSync('git',['status','--porcelain','--untracked-files=no'],{encoding:'utf8'}).trim()!==''}));"
+
+      - name: Install pinned symbolic comparison tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends build-essential cmake ninja-build curl git
+          python -m pip install --disable-pip-version-check -r benchmarks/symbolic-comparison/requirements.txt
+          julia --project=benchmarks/symbolic-comparison/julia --startup-file=no \
+            -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+
+          boost_archive=/tmp/boost_1_86_0.tar.bz2
+          curl --fail --location --silent --show-error \
+            https://archives.boost.io/release/1.86.0/source/boost_1_86_0.tar.bz2 \
+            --output "$boost_archive"
+          echo "1bed88e40401b2cb7a1f76d4bab499e352fa4d0c5f31c0dbae64e24d34d7513b  $boost_archive" \
+            | sha256sum --check --strict
+          tar --extract --bzip2 --file "$boost_archive" --directory /tmp
+
+          mkdir -p .work
+          git init .work/symengine
+          git -C .work/symengine remote add origin https://github.com/symengine/symengine.git
+          git -C .work/symengine fetch --depth 1 origin 0c183629a35dd9d8123fafcc47b0e0283bbae80d
+          git -C .work/symengine checkout --detach FETCH_HEAD
+          cmake -S .work/symengine -B .work/symengine-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DINTEGER_CLASS=boostmp \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_BENCHMARKS=OFF \
+            -DBoost_DIR="$GITHUB_WORKSPACE/benchmarks/symbolic-comparison/cmake" \
+            -DBOOST_ROOT=/tmp/boost_1_86_0
+          cmake --build .work/symengine-build --parallel 2
+          cmake -S benchmarks/symbolic-comparison/competitors -B .work/symengine-runner -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSymEngine_DIR="$GITHUB_WORKSPACE/.work/symengine-build" \
+            -DBoost_DIR="$GITHUB_WORKSPACE/benchmarks/symbolic-comparison/cmake" \
+            -DBOOST_ROOT=/tmp/boost_1_86_0
+          cmake --build .work/symengine-runner --parallel 2
+
+      - name: Build verified compiler revision
+        run: |
+          cmake -S compiler/native -B build/native-compiler -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/native-compiler --parallel 2 --target vkf_strict
+
+      - name: Run release-tier symbolic comparison
+        run: >-
+          node benchmarks/symbolic-comparison/run.mjs
+          --compiler=build/native-compiler/bin/vkf-strict
+          --languages=vkf,symengine,sympy,symbolics
+          --symengine=.work/symengine-runner/symengine_runner
+          --python=python
+          --julia=julia
+          --julia-project=benchmarks/symbolic-comparison/julia
+          --runs=${{ inputs.stage == 'stage1' && '10' || '100' }}
+          --timeout-ms=30000
+          --relative-limit=1.0
+          --enforce-relative-gate=${{ inputs.stage == 'stage1' && 'true' || 'false' }}
+          --output=benchmarks/symbolic-comparison/results/linux-x64-046-${{ inputs.stage }}-${{ github.run_id }}.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-x64-symbolic-comparison-proof
+          path: |
+            source/benchmarks/symbolic-comparison/results/linux-x64-046-${{ inputs.stage }}-${{ github.run_id }}.json
+            source/benchmarks/symbolic-comparison/results/linux-x64-046-${{ inputs.stage }}-${{ github.run_id }}.md
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ github.job }}-source-receipt
+          path: source/source-receipt.json
+          if-no-files-found: error
+
+  build-wasm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: source
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: svenviktorjonsson/vektor-flow
+          ref: ${{ inputs.source_ref }}
+          ssh-key: ${{ secrets.VKF_PRIVATE_REPO_DEPLOY_KEY }}
+          persist-credentials: false
+          path: source
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+      - name: Verify source revision
+        env:
+          EXPECTED_SHA: ${{ inputs.source_ref }}
+        run: >-
+          node -e "const cp=require('node:child_process'),fs=require('node:fs');
+          const sha=cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
+          if(!/^[0-9a-f]{40}$/.test(process.env.EXPECTED_SHA)||sha!==process.env.EXPECTED_SHA)
+          throw Error('compiler revision mismatch');
+          fs.writeFileSync('source-receipt.json',JSON.stringify({sourceRevision:sha,
+          sourceModified:cp.execFileSync('git',['status','--porcelain','--untracked-files=no'],{encoding:'utf8'}).trim()!==''}));"
+      - name: Build browser compiler from the candidate
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE/source:/src" -w /src \
+            emscripten/emsdk:4.0.14 bash scripts/build-shared-compiler.sh
+          cp build/shared-compiler/vkf-compiler.wasm web/playground/artifacts/vkf-shared-compiler.wasm
+      - name: Materialize identical browser inputs
+        run: |
+          docker build -f benchmarks/core-comparison/Dockerfile.wasm-browser-artifacts -t vkf-wasm-browser-artifacts .
+          container="$(docker create vkf-wasm-browser-artifacts)"
+          docker start -a "$container"
+          mkdir -p "$RUNNER_TEMP/wasm-artifacts"
+          docker cp "$container:/src/benchmarks/core-comparison/wasm-artifacts/." "$RUNNER_TEMP/wasm-artifacts"
+          docker rm "$container"
+          node --test benchmarks/core-comparison/wasm-browser-matrix.test.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: same-revision-wasm-inputs
+          path: ${{ runner.temp }}/wasm-artifacts
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ github.job }}-source-receipt
+          path: source/source-receipt.json
+          if-no-files-found: error
+
+  browser-matrix:
+    needs: build-wasm
+    runs-on: macos-15
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: source
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: svenviktorjonsson/vektor-flow
+          ref: ${{ inputs.source_ref }}
+          ssh-key: ${{ secrets.VKF_PRIVATE_REPO_DEPLOY_KEY }}
+          persist-credentials: false
+          path: source
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+      - name: Verify source revision
+        env:
+          EXPECTED_SHA: ${{ inputs.source_ref }}
+        run: >-
+          node -e "const cp=require('node:child_process'),fs=require('node:fs');
+          const sha=cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
+          if(!/^[0-9a-f]{40}$/.test(process.env.EXPECTED_SHA)||sha!==process.env.EXPECTED_SHA)
+          throw Error('compiler revision mismatch');
+          fs.writeFileSync('source-receipt.json',JSON.stringify({sourceRevision:sha,
+          sourceModified:cp.execFileSync('git',['status','--porcelain','--untracked-files=no'],{encoding:'utf8'}).trim()!==''}));"
+      - name: Build native compiler from the same candidate
+        run: |
+          test "$(uname -m)" = arm64
+          cmake -S compiler/native -B build/native-compiler -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/native-compiler --parallel 2 --target vkf
+      - name: Select acceptance stage
+        run: |
+          if [[ "${{ inputs.stage }}" == "stage1" ]]; then
+            echo "BENCH_RUNS=10" >> "$GITHUB_ENV"
+            echo "ENFORCE_NATIVE_RATIO=true" >> "$GITHUB_ENV"
+          else
+            echo "BENCH_RUNS=100" >> "$GITHUB_ENV"
+            echo "ENFORCE_NATIVE_RATIO=false" >> "$GITHUB_ENV"
+          fi
+      - name: Measure same-host native baseline
+        env:
+          VKF_BENCH_DRIVER: ${{ github.workspace }}/source/build/native-compiler/bin/vkf
+        run: >-
+          node benchmarks/core-comparison/run.mjs
+          --case=spectral-norm-small --language=vkf
+          --output=macos-arm64-046-${{ inputs.stage }}-wasm-native-${{ github.run_id }}
+          --compile-runs=1 --compile-warmups=1 --process-runs=1 --process-warmups=1
+          --runs=${BENCH_RUNS} --warmups=10 --function-landscape-runs=0
+      - uses: actions/download-artifact@v4
+        with:
+          name: same-revision-wasm-inputs
+          path: source/benchmarks/core-comparison/wasm-artifacts
+      - name: Prepare actual browser drivers
+        run: |
+          echo "$CHROMEWEBDRIVER" >> "$GITHUB_PATH"
+          echo "$GECKOWEBDRIVER" >> "$GITHUB_PATH"
+          sudo safaridriver --enable
+          "$CHROMEWEBDRIVER/chromedriver" --version
+          "$GECKOWEBDRIVER/geckodriver" --version
+          safaridriver --version
+      - name: Measure three browsers
+        run: >-
+          node benchmarks/core-comparison/run-wasm-browser-matrix.mjs
+          --browsers=chrome,firefox,safari
+          --output=macos-arm64-046-${{ inputs.stage }}-wasm-${{ github.run_id }}
+          --native-report=benchmarks/core-comparison/results/macos-arm64-046-${{ inputs.stage }}-wasm-native-${{ github.run_id }}.json
+          --native-ratio-limit=2 --runs=${BENCH_RUNS} --warmups=10
+          --enforce-native-ratio=${ENFORCE_NATIVE_RATIO}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-matrix-${{ inputs.stage }}
+          if-no-files-found: warn
+          path: |
+            source/benchmarks/core-comparison/results/macos-arm64-046-${{ inputs.stage }}-wasm*-${{ github.run_id }}.json
+            source/benchmarks/core-comparison/results/macos-arm64-046-${{ inputs.stage }}-wasm*-${{ github.run_id }}.md
+            source/benchmarks/core-comparison/wasm-artifacts/spectral-norm-small/manifest.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ github.job }}-source-receipt
+          path: source/source-receipt.json
+          if-no-files-found: error
