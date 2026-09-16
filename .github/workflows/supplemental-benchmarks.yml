@@ -14,16 +14,27 @@ on:
         options:
           - stage1
           - stage2
+      suite:
+        description: Required suite to measure (all for acceptance)
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - linalg
+          - symbolic
+          - wasm
 
 permissions:
   contents: read
 
 concurrency:
-  group: supplemental-${{ inputs.source_ref }}-${{ inputs.stage }}
+  group: supplemental-${{ inputs.source_ref }}-${{ inputs.stage }}-${{ inputs.suite }}
   cancel-in-progress: false
 
 jobs:
   linalg-windows-x64:
+    if: inputs.suite == 'all' || inputs.suite == 'linalg'
     runs-on: windows-latest
     timeout-minutes: 90
     defaults:
@@ -61,6 +72,22 @@ jobs:
         shell: pwsh
         run: .\scripts\build-native-compiler.ps1 -OnlyTargets @("vkf-strict")
 
+      - name: Build linear-algebra VKF runners
+        shell: pwsh
+        run: node benchmarks/linalg-comparison/build-vkf-runners.mjs --compiler=build/native-compiler-clang/bin/vkf-strict.exe --output=.work/linalg-vkf-release
+
+      - name: Retain temporary compiler diagnostics
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linalg-compiler-diagnostics
+          path: |
+            source/build/native-compiler-clang/bin/vkf-strict.exe
+            source/.work/linalg-vkf-release/*.vkf
+            source/source-receipt.json
+          if-no-files-found: warn
+          retention-days: 1
+
       - name: Build pinned linear-algebra competitors
         shell: pwsh
         run: |
@@ -68,7 +95,6 @@ jobs:
           cmake -S benchmarks/linalg-comparison/competitors/eigen -B .work/linalg-eigen -DCMAKE_BUILD_TYPE=Release
           cmake --build .work/linalg-eigen --config Release --parallel 2
           cargo build --release --manifest-path benchmarks/linalg-comparison/competitors/faer/Cargo.toml
-          node benchmarks/linalg-comparison/build-vkf-runners.mjs --compiler=build/native-compiler-clang/bin/vkf-strict.exe --output=.work/linalg-vkf-release
 
       - name: Run release-tier linear-algebra comparison
         shell: pwsh
@@ -101,6 +127,7 @@ jobs:
           if-no-files-found: error
 
   symbolic-comparison-linux-x64:
+    if: inputs.suite == 'all' || inputs.suite == 'symbolic'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     defaults:
@@ -210,6 +237,7 @@ jobs:
           if-no-files-found: error
 
   build-wasm:
+    if: inputs.suite == 'all' || inputs.suite == 'wasm'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
@@ -236,6 +264,8 @@ jobs:
           throw Error('compiler revision mismatch');
           fs.writeFileSync('source-receipt.json',JSON.stringify({sourceRevision:sha,
           sourceModified:cp.execFileSync('git',['status','--porcelain','--untracked-files=no'],{encoding:'utf8'}).trim()!==''}));"
+      - name: Validate direct WASM scalar homes
+        run: node --test tests/bootstrap/wasm-machine-ir-direct.test.mjs
       - name: Build browser compiler from the candidate
         run: |
           docker run --rm -v "$GITHUB_WORKSPACE/source:/src" -w /src \
