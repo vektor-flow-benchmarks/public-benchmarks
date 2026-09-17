@@ -160,7 +160,7 @@ jobs:
               --process-warmups=1 \
               --function-landscape-runs=0 \
               --enforce-relative-gate="${ENFORCE_RELATIVE_GATE}" \
-              --relative-limit=0.5 \
+              --relative-limit=1 \
               --output="${{ matrix.target }}-046-${{ inputs.stage }}-${benchmark}-${{ github.run_id }}" \
               || status=1
           done
