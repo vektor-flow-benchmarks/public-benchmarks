@@ -17,6 +17,11 @@ on:
         required: false
         default: 'false'
 
+      llvm_cold:
+        description: Keep setup strict and guard optimized loops with precision initially clear
+        required: false
+        default: 'false'
+
 permissions:
   contents: read
 
@@ -156,7 +161,9 @@ jobs:
             dynamic=llvm-build/dynamic_mir_dumper
             fixtures=llvm-build/fixture_dumper
           fi
-          python source/compiler/native/diagnostics/llvm-numeric/probe.py "$dynamic" "$fixtures" llvm-inspection
+          mode=warm
+          if [ "${{ inputs.llvm_cold }}" = true ]; then mode=cold; fi
+          python source/compiler/native/diagnostics/llvm-numeric/probe.py "$dynamic" "$fixtures" llvm-inspection "$mode"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
