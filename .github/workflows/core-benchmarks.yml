@@ -202,19 +202,28 @@ jobs:
               --relative-limit=1 \
               --output="${{ matrix.target }}-046-${{ inputs.stage }}-${benchmark}-${{ github.run_id }}" \
               || status=1
+            if [[ "${{ inputs.backend }}" == "best-validated-research" ]]; then
+              BENCH_CASE="$benchmark" node --input-type=module -e '
+                import { benchmarkWorkRoot } from "./benchmarks/core-comparison/run.mjs";
+                import { cpSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+                import { resolve } from "node:path";
+                const target = resolve("..", "ordinary-source-policy-proof", process.env.BENCH_CASE);
+                function retain(directory) {
+                  if (!existsSync(directory)) return;
+                  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+                    if (!entry.isDirectory()) continue;
+                    const path = resolve(directory, entry.name);
+                    if (entry.name === "numeric-ssa-research") {
+                      mkdirSync(target, { recursive: true });
+                      cpSync(path, target, { recursive: true });
+                    } else retain(path);
+                  }
+                }
+                retain(resolve(benchmarkWorkRoot(), process.env.BENCH_CASE));
+              ' || status=1
+            fi
           done
           exit "$status"
-
-      - name: Retain ordinary-source backend execution receipts
-        if: always() && inputs.backend == 'best-validated-research'
-        shell: bash
-        run: |
-          mkdir -p ordinary-source-policy-proof
-          while IFS= read -r directory; do
-            case_name="$(basename "$(dirname "$(dirname "$(dirname "$directory")")")")"
-            mkdir -p "ordinary-source-policy-proof/$case_name"
-            cp -R "$directory/." "ordinary-source-policy-proof/$case_name/"
-          done < <(find source/benchmarks/core-comparison/published -type d -name numeric-ssa-research)
 
       - uses: actions/upload-artifact@v4
         if: always()
