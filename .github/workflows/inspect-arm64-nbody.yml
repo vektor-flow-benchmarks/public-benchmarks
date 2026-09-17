@@ -22,6 +22,16 @@ on:
         required: false
         default: 'false'
 
+      llvm_runs:
+        description: Measured samples per implementation in the changed-backend comparison
+        required: false
+        default: '100'
+
+      llvm_peers:
+        description: Matched peers for the changed-backend comparison
+        required: false
+        default: rust
+
 permissions:
   contents: read
 
@@ -146,12 +156,20 @@ jobs:
           rustup toolchain install 1.98.0 --profile minimal
           rustup default 1.98.0
           python -m pip install --only-binary=:all: llvmlite==0.49.0
+      - uses: mlugg/setup-zig@v2
+        if: contains(inputs.llvm_peers, 'zig')
+        with:
+          version: 0.16.0
+      - name: Install Windows Clang peer
+        if: runner.os == 'Windows' && contains(inputs.llvm_peers, 'cpp')
+        shell: pwsh
+        run: choco install llvm --yes --no-progress
       - name: Build native references from checked-out source
         shell: bash
         run: |
           cmake -S source/compiler/native/diagnostics/llvm-numeric -B llvm-build -DCMAKE_BUILD_TYPE=Release
           cmake --build llvm-build --config Release --target dynamic_mir_dumper fixture_dumper --parallel 2
-      - name: Check semantics and measure matched VKF divided by Rust
+      - name: Test the changed SSA backend against native and selected peers
         shell: bash
         run: |
           if [ "$RUNNER_OS" = Windows ]; then
@@ -164,7 +182,7 @@ jobs:
           mode=warm
           if [ "${{ inputs.llvm_cold }}" = true ]; then mode=cold; fi
           if [ "${{ inputs.llvm_cold }}" = token ]; then mode=token; fi
-          python source/compiler/native/diagnostics/llvm-numeric/probe.py "$dynamic" "$fixtures" llvm-inspection "$mode"
+          python source/compiler/native/diagnostics/llvm-numeric/probe.py "$dynamic" "$fixtures" llvm-inspection "$mode" "${{ inputs.llvm_runs }}" "${{ inputs.llvm_peers }}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
