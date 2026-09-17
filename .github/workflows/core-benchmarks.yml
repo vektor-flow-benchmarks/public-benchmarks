@@ -122,8 +122,8 @@ jobs:
           extra_cmake=()
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             extra_cmake+=(
-              "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang.exe"
-              "-DCMAKE_CXX_COMPILER=C:/Program Files/LLVM/bin/clang++.exe"
+              "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang-cl.exe"
+              "-DCMAKE_CXX_COMPILER=C:/Program Files/LLVM/bin/clang-cl.exe"
               "-DCMAKE_LINKER=C:/Program Files/LLVM/bin/lld-link.exe"
             )
           fi
