@@ -1,4 +1,4 @@
-name: Package Vektor Flow 0.4.5
+name: Package Vektor Flow 0.4.6
 
 on:
   workflow_dispatch:
@@ -6,13 +6,19 @@ on:
       private_ref:
         description: Private Vektor Flow ref to package
         required: true
-        default: candidate-driver-0.4.5
+        default: release/0.4.6-general-optimizer
+
+      publish_release:
+        description: Publish after the final benchmark audit
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: write
 
 concurrency:
-  group: package-vektor-flow-0.4.5
+  group: package-vektor-flow-0.4.6
   cancel-in-progress: false
 
 jobs:
@@ -27,6 +33,13 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+      - uses: actions/checkout@v5
+        with:
+          path: .release-runner
+      - name: Verify immutable release source
+        env:
+          RELEASE_SOURCE_REF: ${{ inputs.private_ref }}
+        run: node .release-runner/tools/release-receipt.mjs checkout
       - name: Install build tools
         shell: pwsh
         run: choco install llvm nsis --yes --no-progress
@@ -39,11 +52,13 @@ jobs:
           .\build\native-compiler-clang\bin\vkf_pe_writer_capacity_test.exe
           .\build\native-compiler-clang\bin\vkf-strict.exe -t tests/vkf
           .\build\native-compiler-clang\bin\vkf-strict.exe -t tests/stdlib
-      - name: Package Windows 0.4.5
+      - name: Package Windows 0.4.6
         shell: pwsh
         run: |
-          .\scripts\package-native-release.ps1 -Version 0.4.5 -UiBinaryDirectory build/v
-          .\scripts\build-windows-installer.ps1 -Version 0.4.5
+          .\scripts\package-native-release.ps1 -Version 0.4.6 -UiBinaryDirectory build/v
+          .\scripts\build-windows-installer.ps1 -Version 0.4.6
+      - name: Bind release files to measured compiler
+        run: node .release-runner/tools/release-receipt.mjs artifacts windows-x64
       - uses: actions/upload-artifact@v4
         with:
           name: windows-x64-release
@@ -53,6 +68,7 @@ jobs:
             dist/releases/vektor-flow-windows-x64.zip.sha256
             dist/releases/vektor-flow-windows-x64-setup.exe
             dist/releases/vektor-flow-windows-x64-setup.exe.sha256
+            dist/releases/windows-x64-release-receipt.json
 
   linux-x64:
     runs-on: ubuntu-22.04
@@ -62,6 +78,16 @@ jobs:
           repository: svenviktorjonsson/vektor-flow
           ref: ${{ inputs.private_ref }}
           ssh-key: ${{ secrets.VKF_PRIVATE_REPO_DEPLOY_KEY }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: actions/checkout@v5
+        with:
+          path: .release-runner
+      - name: Verify immutable release source
+        env:
+          RELEASE_SOURCE_REF: ${{ inputs.private_ref }}
+        run: node .release-runner/tools/release-receipt.mjs checkout
       - name: Install build tools
         run: |
           sudo apt-get update
@@ -73,10 +99,12 @@ jobs:
           build/native-compiler/bin/vkf-strict -t tests/vkf
           build/native-compiler/bin/vkf-strict -t tests/stdlib
           VKF_NATIVE_BIN=build/native-compiler/bin node tools/verify-stdlib-wasm.mjs
-      - name: Package Linux 0.4.5
+      - name: Package Linux 0.4.6
         run: |
           chmod +x scripts/package-native-release.sh
-          scripts/package-native-release.sh 0.4.5
+          scripts/package-native-release.sh 0.4.6
+      - name: Bind release files to measured compiler
+        run: node .release-runner/tools/release-receipt.mjs artifacts linux-x64
       - uses: actions/upload-artifact@v4
         with:
           name: linux-x64-release
@@ -86,6 +114,7 @@ jobs:
             dist/releases/vektor-flow-linux-x64.tar.gz.sha256
             dist/releases/vektor-flow-linux-x64.deb
             dist/releases/vektor-flow-linux-x64.deb.sha256
+            dist/releases/linux-x64-release-receipt.json
 
   macos-arm64:
     runs-on: macos-15
@@ -98,6 +127,13 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+      - uses: actions/checkout@v5
+        with:
+          path: .release-runner
+      - name: Verify immutable release source
+        env:
+          RELEASE_SOURCE_REF: ${{ inputs.private_ref }}
+        run: node .release-runner/tools/release-receipt.mjs checkout
       - name: Build and test the compiler
         run: |
           test "$(uname -m)" = arm64
@@ -106,10 +142,12 @@ jobs:
           build/native-compiler/bin/vkf-strict -t tests/vkf
           build/native-compiler/bin/vkf-strict -t tests/stdlib
           VKF_NATIVE_BIN=build/native-compiler/bin node tools/verify-stdlib-wasm.mjs
-      - name: Package macOS 0.4.5
+      - name: Package macOS 0.4.6
         run: |
           chmod +x scripts/package-native-release-macos.sh packaging/macos/install.sh
-          scripts/package-native-release-macos.sh 0.4.5
+          scripts/package-native-release-macos.sh 0.4.6
+      - name: Bind release files to measured compiler
+        run: node .release-runner/tools/release-receipt.mjs artifacts macos-arm64
       - uses: actions/upload-artifact@v4
         with:
           name: macos-arm64-release
@@ -119,6 +157,7 @@ jobs:
             dist/releases/vektor-flow-macos-arm64.tar.gz.sha256
             dist/releases/vektor-flow-macos-arm64.pkg
             dist/releases/vektor-flow-macos-arm64.pkg.sha256
+            dist/releases/macos-arm64-release-receipt.json
 
   browser-wasm:
     runs-on: ubuntu-22.04
@@ -131,6 +170,13 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+      - uses: actions/checkout@v5
+        with:
+          path: .release-runner
+      - name: Verify immutable release source
+        env:
+          RELEASE_SOURCE_REF: ${{ inputs.private_ref }}
+        run: node .release-runner/tools/release-receipt.mjs checkout
       - name: Build and verify browser compilers
         run: |
           sudo apt-get update
@@ -142,7 +188,7 @@ jobs:
           docker run --rm -v "$GITHUB_WORKSPACE:/src" -w /src emscripten/emsdk:4.0.14 bash scripts/build-shared-compiler.sh
           cmp build/shared-compiler/vkf-compiler.wasm web/playground/artifacts/vkf-shared-compiler.wasm
           VKF_NATIVE_COMPILER=build/native-compiler/bin/vkf-strict node --test tests/js/browser-compiler-runtime.test.mjs tests/js/browser-compiler-release.test.mjs
-      - name: Package browser WebAssembly 0.4.5
+      - name: Package browser WebAssembly 0.4.6
         run: |
           mkdir -p dist/releases/vektor-flow-browser-wasm
           node tools/package-browser-compiler.mjs --output=dist/releases/vektor-flow-browser-wasm
@@ -151,6 +197,8 @@ jobs:
           sha256sum vektor-flow-browser-wasm.zip > vektor-flow-browser-wasm.zip.sha256
           cp vektor-flow-browser-wasm/artifacts/vkf-shared-compiler.wasm vkf-shared-compiler.wasm
           sha256sum vkf-shared-compiler.wasm > vkf-shared-compiler.wasm.sha256
+      - name: Bind release files to measured compiler
+        run: node .release-runner/tools/release-receipt.mjs artifacts browser-wasm
       - uses: actions/upload-artifact@v4
         with:
           name: browser-wasm-release
@@ -160,8 +208,10 @@ jobs:
             dist/releases/vektor-flow-browser-wasm.zip.sha256
             dist/releases/vkf-shared-compiler.wasm
             dist/releases/vkf-shared-compiler.wasm.sha256
+            dist/releases/browser-wasm-release-receipt.json
 
   publish:
+    if: inputs.publish_release
     needs: [windows-x64, linux-x64, macos-arm64, browser-wasm]
     runs-on: ubuntu-latest
     steps:
@@ -170,13 +220,13 @@ jobs:
           path: dist
           pattern: "*-release"
           merge-multiple: true
-      - name: Publish source-free 0.4.5 assets
+      - name: Publish source-free 0.4.6 assets
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          if gh release view v0.4.5 >/dev/null 2>&1; then
-            gh release upload v0.4.5 dist/* --clobber
+          if gh release view v0.4.6 >/dev/null 2>&1; then
+            gh release upload v0.4.6 dist/* --clobber
           else
-            gh release create v0.4.5 dist/* --title "Vektor Flow 0.4.5" --notes "Source-free compiler packages and checksums for Vektor Flow 0.4.5."
+            gh release create v0.4.6 dist/* --title "Vektor Flow 0.4.6" --notes "Source-free compiler packages and checksums for Vektor Flow 0.4.6."
           fi
