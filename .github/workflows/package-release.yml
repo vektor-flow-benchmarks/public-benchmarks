@@ -186,6 +186,7 @@ jobs:
           cmake --build build/native-compiler --parallel 2 --target vkf_strict vkf_symbolic_kernel_artifact
           VKF_NATIVE_BIN=build/native-compiler/bin npm run build:browser-compiler
           docker run --rm -v "$GITHUB_WORKSPACE:/src" -w /src emscripten/emsdk:4.0.14 bash scripts/build-shared-compiler.sh
+          cp build/shared-compiler/vkf-compiler.wasm web/playground/artifacts/vkf-shared-compiler.wasm
           cmp build/shared-compiler/vkf-compiler.wasm web/playground/artifacts/vkf-shared-compiler.wasm
           VKF_NATIVE_COMPILER=build/native-compiler/bin/vkf-strict node --test tests/js/browser-compiler-runtime.test.mjs tests/js/browser-compiler-release.test.mjs
       - name: Package browser WebAssembly 0.4.6
