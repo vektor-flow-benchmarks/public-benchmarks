@@ -35,8 +35,19 @@ concurrency:
 jobs:
   linalg-windows-x64:
     if: inputs.suite == 'all' || inputs.suite == 'linalg'
+    strategy:
+      fail-fast: false
+      matrix:
+        kernel:
+          - solve-general-96
+          - least-squares-tall-96x48
+          - lu-general-96
+          - qr-tall-96x48
+          - cholesky-spd-96
+          - svd-tall-96x48
+          - eigen-symmetric-96
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 360
     defaults:
       run:
         working-directory: source
@@ -78,13 +89,13 @@ jobs:
 
       - name: Build linear-algebra VKF runners
         shell: pwsh
-        run: node benchmarks/linalg-comparison/build-vkf-runners.mjs --compiler=build/native-compiler-clang/bin/vkf-strict.exe --output=.work/linalg-vkf-release
+        run: node benchmarks/linalg-comparison/build-vkf-runners.mjs --compiler=build/native-compiler-clang/bin/vkf-strict.exe --output=.work/linalg-vkf-release --kernels=${{ matrix.kernel }}
 
       - name: Retain temporary compiler diagnostics
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: linalg-compiler-diagnostics
+          name: linalg-compiler-diagnostics-${{ matrix.kernel }}
           include-hidden-files: true
           path: |
             source/build/native-compiler-clang/bin/vkf-strict.exe
@@ -106,6 +117,7 @@ jobs:
         shell: pwsh
         run: >-
           node benchmarks/linalg-comparison/run.mjs
+          --kernels=${{ matrix.kernel }}
           --languages=vkf,eigen,faer,scipy
           --runs=${{ inputs.stage == 'stage1' && '10' || '100' }}
           --threads=1
@@ -115,20 +127,20 @@ jobs:
           --python=python
           --relative-limit=1.0
           --enforce-relative-gate=${{ inputs.stage == 'stage1' && 'true' || 'false' }}
-          --output=benchmarks/linalg-comparison/results/windows-x64-046-${{ inputs.stage }}-${{ github.run_id }}.json
+          --output=benchmarks/linalg-comparison/results/windows-x64-046-${{ inputs.stage }}-${{ matrix.kernel }}-${{ github.run_id }}.json
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: windows-x64-linalg-comparison-proof
+          name: windows-x64-linalg-comparison-proof-${{ matrix.kernel }}
           path: |
-            source/benchmarks/linalg-comparison/results/windows-x64-046-${{ inputs.stage }}-${{ github.run_id }}.json
-            source/benchmarks/linalg-comparison/results/windows-x64-046-${{ inputs.stage }}-${{ github.run_id }}.md
+            source/benchmarks/linalg-comparison/results/windows-x64-046-${{ inputs.stage }}-${{ matrix.kernel }}-${{ github.run_id }}.json
+            source/benchmarks/linalg-comparison/results/windows-x64-046-${{ inputs.stage }}-${{ matrix.kernel }}-${{ github.run_id }}.md
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ${{ github.job }}-source-receipt
+          name: ${{ github.job }}-${{ matrix.kernel }}-source-receipt
           path: source/source-receipt.json
           if-no-files-found: error
 
