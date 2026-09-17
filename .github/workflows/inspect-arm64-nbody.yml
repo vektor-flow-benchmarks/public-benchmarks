@@ -12,12 +12,17 @@ on:
         required: false
         default: 'false'
 
+      llvm_numeric:
+        description: Measure the guarded general numeric SSA diagnostic on x64
+        required: false
+        default: 'false'
+
 permissions:
   contents: read
 
 jobs:
   assembly:
-    if: inputs.rust_x64 != 'true'
+    if: inputs.rust_x64 != 'true' && inputs.llvm_numeric != 'true'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +52,7 @@ jobs:
             fannkuch-apple-arm64.s
 
   rust_x64:
-    if: inputs.rust_x64 == 'true'
+    if: inputs.rust_x64 == 'true' && inputs.llvm_numeric != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -109,4 +114,52 @@ jobs:
         with:
           name: rust-codegen-${{ matrix.os }}
           path: rust-inspection
+
+  llvm_numeric:
+    if: inputs.llvm_numeric == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out private compiler diagnostic
+        uses: actions/checkout@v4
+        with:
+          repository: svenviktorjonsson/vektor-flow
+          ref: ${{ inputs.source_ref }}
+          ssh-key: ${{ secrets.VKF_PRIVATE_REPO_DEPLOY_KEY }}
+          persist-credentials: false
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned diagnostic toolchains
+        shell: bash
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal
+          rustup default 1.98.0
+          python -m pip install --only-binary=:all: llvmlite==0.49.0
+      - name: Build native references from checked-out source
+        shell: bash
+        run: |
+          cmake -S source/compiler/native/diagnostics/llvm-numeric -B llvm-build -DCMAKE_BUILD_TYPE=Release
+          cmake --build llvm-build --config Release --target dynamic_mir_dumper fixture_dumper --parallel 2
+      - name: Check semantics and measure matched VKF divided by Rust
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            dynamic=llvm-build/Release/dynamic_mir_dumper.exe
+            fixtures=llvm-build/Release/fixture_dumper.exe
+          else
+            dynamic=llvm-build/dynamic_mir_dumper
+            fixtures=llvm-build/fixture_dumper
+          fi
+          python source/compiler/native/diagnostics/llvm-numeric/probe.py "$dynamic" "$fixtures" llvm-inspection
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: llvm-numeric-${{ matrix.os }}
+          path: llvm-inspection
 
