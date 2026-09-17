@@ -225,6 +225,34 @@ jobs:
           done
           exit "$status"
 
+      - name: Label research timing in each readable report
+        if: always() && inputs.backend == 'best-validated-research'
+        shell: bash
+        env:
+          BENCH_RUN_ID: ${{ github.run_id }}
+        run: |
+          cd source
+          node --input-type=module -e '
+            import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+            import { resolve } from "node:path";
+            const root = resolve("benchmarks/core-comparison/results");
+            for (const name of readdirSync(root)) {
+              if (!name.endsWith(`-${process.env.BENCH_RUN_ID}.json`)) continue;
+              const payload = JSON.parse(readFileSync(resolve(root, name), "utf8"));
+              if (!payload.options.numericSsaResearch || payload.productionReleaseEvidence !== false)
+                throw Error("Research report lacks an explicit evidence classification");
+              const entries = payload.results.filter(row => row.language === "vkf");
+              const selected = entries.map(row => `${row.case}: ${[...new Set(row.nativeRuntimeResearchReceipts.map(receipt => receipt.selected_backend))].join(", ")}`);
+              const note = "**Research candidate; this report does not certify production release performance.**\n\n" +
+                "Raw native-entry timing executes guarded numeric SSA where eligibility, exact checks and matched tuning pass. " +
+                "AOT artifacts, process timing and compile timing use the existing native compiler.\n\n" +
+                selected.join("\n\n") + "\n\n";
+              const path = resolve(root, name.replace(/\.json$/, ".md"));
+              const report = readFileSync(path, "utf8");
+              writeFileSync(path, report.replace("# Core language benchmark\n\n", "# Core language benchmark\n\n" + note));
+            }
+          '
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
