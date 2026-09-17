@@ -1,0 +1,75 @@
+name: Inspect Rust x64 codegen
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        required: true
+        default: release/0.4.6-general-optimizer
+
+permissions:
+  contents: read
+
+jobs:
+  assembly:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out private benchmark source
+        uses: actions/checkout@v4
+        with:
+          repository: svenviktorjonsson/vektor-flow
+          ref: ${{ inputs.source_ref }}
+          ssh-key: ${{ secrets.VKF_PRIVATE_REPO_DEPLOY_KEY }}
+          persist-credentials: false
+          path: source
+      - name: Install measured Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal
+          rustup default 1.98.0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Capture optimizer output and pass ablations
+        shell: bash
+        run: |
+          mkdir -p rust-inspection
+          rustc --version --verbose > rust-inspection/toolchain.txt
+          git -C source rev-parse HEAD > rust-inspection/source-commit.txt
+          git -C source status --porcelain --untracked-files=no > rust-inspection/source-status.txt
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess, platform, ctypes, statistics, time, struct, hashlib, json
+          root=Path('rust-inspection').resolve()
+          source=Path('source/benchmarks/core-comparison/published/n-body-large/rust.rs').resolve()
+          variants={'default':[], 'no-slp':['-C','no-vectorize-slp'], 'no-loops':['-C','no-vectorize-loops'], 'no-vectorizers':['-C','no-vectorize-slp','-C','no-vectorize-loops']}
+          libraries={};commands={};samples={v:[] for v in variants};bits={v:set() for v in variants}
+          for variant,extra in variants.items():
+              output=root/variant;output.mkdir()
+              command=['rustc','-O','-C','target-cpu=native','--crate-type','cdylib','--emit=link,asm,llvm-ir','-C','llvm-args=-x86-asm-syntax=intel',*extra,str(source),'--out-dir',str(output)]
+              commands[variant]=command;subprocess.run(command,check=True)
+              binary=output/('rust.dll' if platform.system()=='Windows' else 'librust.so')
+              library=ctypes.CDLL(str(binary));library.vkf_benchmark.restype=ctypes.c_double;libraries[variant]=library
+              for _ in range(2):library.vkf_benchmark()
+          for round in range(20):
+              order=list(variants) if round%2==0 else list(reversed(variants))
+              for variant in order:
+                  start=time.perf_counter_ns();value=libraries[variant].vkf_benchmark();elapsed=time.perf_counter_ns()-start
+                  samples[variant].append(elapsed/1e6);bits[variant].add(struct.pack('<d',value).hex())
+          baseline=statistics.median(samples['default'])
+          cpu=subprocess.check_output(['powershell','-NoProfile','-Command','Get-CimInstance Win32_Processor | Select-Object Name,NumberOfLogicalProcessors | ConvertTo-Json'],text=True) if platform.system()=='Windows' else subprocess.check_output(['lscpu'],text=True)
+          report={'diagnostic_only':True,'platform':platform.platform(),'cpu':cpu,'source_sha256':hashlib.sha256(source.read_bytes()).hexdigest(),'source_lf_sha256':hashlib.sha256(source.read_bytes().replace(b'\r\n',b'\n')).hexdigest(),'commands':commands,'variants':{v:{'samples_ms':samples[v],'median_ms':statistics.median(samples[v]),'variant_over_default':statistics.median(samples[v])/baseline,'result_bits':sorted(bits[v])} for v in variants}}
+          (root/'pass-ablation.json').write_text(json.dumps(report,indent=2))
+          print(json.dumps({v:{k:x for k,x in r.items() if k!='samples_ms'} for v,r in report['variants'].items()},indent=2))
+          assert len({tuple(sorted(value)) for value in bits.values()})==1
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-codegen-${{ matrix.os }}
+          path: rust-inspection
