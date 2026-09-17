@@ -18,7 +18,7 @@ on:
         default: 'false'
 
       llvm_cold:
-        description: Keep setup strict and guard optimized loops with precision initially clear
+        description: Use true for outlined or token for inline guarded loops with precision initially clear
         required: false
         default: 'false'
 
@@ -163,6 +163,7 @@ jobs:
           fi
           mode=warm
           if [ "${{ inputs.llvm_cold }}" = true ]; then mode=cold; fi
+          if [ "${{ inputs.llvm_cold }}" = token ]; then mode=token; fi
           python source/compiler/native/diagnostics/llvm-numeric/probe.py "$dynamic" "$fixtures" llvm-inspection "$mode"
       - uses: actions/upload-artifact@v4
         if: always()
